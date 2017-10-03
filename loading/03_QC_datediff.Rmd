@@ -1,0 +1,99 @@
+---
+title: "QC datediff features"
+author: "Norman Poh"
+date: "3 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## we define a series of helper functions here to do QC of date difference
+
+```{r}
+
+
+mystat <- function(x) {
+  min_ = min(unlist(x), na.rm=TRUE)
+  max_ = max(unlist(x), na.rm=TRUE)
+  return(c(min=min_,max=max_))
+}  
+
+period_ = cut_linux(colnames(date_), field = 1, delimiter = "_");
+
+make_positive <- function(x) {
+  x[x< 0] = NA
+  return(x)
+}
+make_negative <- function(x) {
+  x[x> 0] = NA
+  return(x)
+}
+remove_inf <- function(x) {
+  x[is.infinite(x)] = NA
+  return(x)
+}
+
+remove_na <- function(x) {
+  x = x[! is.na(x)] 
+  return(x)
+}
+
+```
+
+## check that all pre-index dates are negative
+```{r}
+if (FALSE) {
+  isdate = hashmap(combined_config$Column, combined_config$isdate)
+  var_period = hashmap(combined_config$Column, combined_config$var_period)
+  
+  colnames_ = colnames(date_)
+  indices = var_period[[colnames_]]
+  
+  stat_ = as.data.frame(t((sapply(date_[,indices], mystat))))
+
+  colnames_datediff_var[which(stat_$max>0)]
+  View(stat_)
+  
+  date_[,indices] = make_positive(date_[,indices])
+  
+  
+  # all post-index dates should be negative
+  indices = which(period_=="post")
+  stat_ = t((sapply(date_[,indices], mystat)))
+  View(stat_)
+  
+  tmp_ = make_negative(date_[,indices])
+  stat_ = t(sapply(tmp_, mystat))
+  View(stat_)
+  
+  date_[,indices] = make_negative(date_[,indices])
+  
+  
+  date_$pat_id = combined_data$pat_id
+}
+
+saveRDS(date_, "datediff.rds")
+
+# now deal with the config files of the datediff_data
+write_csv(date_, 'datediff.csv')
+
+#save the combined_data
+dim(combined_data)
+dim(date_)
+
+# create the combined file      
+combined_data_datediff = cbind(combined_data, date_ %>% select( -one_of('pat_id')) )
+saveRDS(combined_data_datediff, 'combined_data_datediff.rds')
+
+combined_config = tibble( Column = colnames(combined_data_datediff ) )
+combined_config$Type = var_type[[combined_config$Column]]
+
+selected = str_detect(combined_config$Column, '_diff$')
+combined_config$Type[selected] = 'numerical'
+
+#then check the file manually
+write_csv(combined_config, 'combined_data_datediff_var_config.csv')
+
+```

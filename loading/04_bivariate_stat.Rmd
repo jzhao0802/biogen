@@ -1,0 +1,171 @@
+---
+title: "Bivariate stat"
+author: "Norman Poh"
+date: "3 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Init
+```{r}
+setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/loading")
+
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(ROCR)
+source("../lib/cut_linux.R")
+source("../lib/mystat.R")
+source('../lib/plot_cond_density.R')
+
+```
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_data.rds")
+config = readRDS("D:/Data/Processed/combined_date_config.rds")
+#write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
+#write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
+
+var_config_generator(input_csv = "D:/Data/Processed/combined_date_data.csv",
+                     prefix = "final_",
+                     output_dir = "D:/Data/Processed")
+#var_config output is D:/Data/Processed/final_var_config.csv
+```
+
+## Checking
+
+```{r}
+final_config = read_csv("D:/Data/Processed/final_var_config.csv")
+config = read_csv("D:/Data/Processed/combined_date_config.csv")
+
+sum(final_config$Column==config$Column)
+#final_config$Type = config$Type
+final_config$Type[ final_config$Column=='pat_id' ] = 'key'
+final_config$Type[ config$isdate ] = 'others'
+final_config$Type[ final_config$Column=='npi'] = 'others'
+
+#final_config$Column[str_detect(colnames(combined),'flg')]
+final_config$Type[ str_detect(colnames(combined),'flg')] = 'categorical'
+
+write_csv(final_config, "D:/Data/Processed/final_var_config.csv")
+```
+## Univariate stats
+
+```{r}
+univar_results <- univariate_stats(input = combined,
+  var_config = "D:/Data/Processed/final_var_config.csv",
+  output_dir = "D:/Data/QC/univar",
+  vargt0 = FALSE)
+
+View(univar_results$cat)
+
+```
+## remove variables that are poorly populated
+```{r}
+var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
+
+#remove the variables from data and from the config file
+final_config = final_config %>% filter( ! (final_config$Column %in% var2remove) )
+
+#make correction
+final_config$Type[ str_detect(final_config$Column,'_diff$') ] = 'numerical'
+
+combined = combined %>% select( -matches(paste(var2remove, collapse="|"))) 
+
+# Check for consistency
+nrow(final_config) 
+ncol(combined)
+sum(colnames(combined) == final_config$Column)
+
+# we save the var_config for QC use
+write_csv(final_config, "D:/Data/QC/var_config.csv")
+```
+
+## when the outcome is discrete
+```{r}
+bivariate_stats_cat(input = combined, 
+                    var_config = "D:/Data/QC/var_config.csv",
+                    outcome_var = "discontinue_flg", 
+                    output_dir = "D:/Data/QC/bivar_stats_cat",
+                    count = 5, 
+                    vargt0 = FALSE)
+```
+
+## plot all numerical values except those containing flg
+
+```{r}
+#debug(plot_cond_density)
+#undebug(plot_cond_density)
+
+library(R.utils)
+final_config$Description = config$Description
+
+dim(final_config)
+dim(combined)
+
+colnames_ = colnames(combined)
+
+# selected_var = (final_config$Type=="numerical" |
+#   final_config$var_type == "date-difference" ) & 
+#   ! str_detect(final_config$Column, "NPI|age_group|HCE_ID")
+
+selected_var = final_config$Type=="numerical" &
+   ! str_detect(final_config$Column, "npi|age_group|hce_id")
+        
+indices = which(selected_var)
+colnames_[indices]
+
+count_stat = vector(mode = "list", length = length(indices))
+
+mkdirs("D:/Data/QC/univar_cond")
+for (j in 1:length(indices)) {
+  var_index = indices[j]
+  print( sprintf("%s", colnames_[indices[j]]))
+  final_config$Description[indices[j]]
+  #print( quantile( as.matrix(combined_data[,indices[j]]), na.rm = TRUE) ) 
+  count_stat[[j]] = plot_cond_density(combined, 
+    var_index = indices[j], 
+    target = combined$discontinue_flg,
+    target_label = 'discon',
+    description = config$Description[indices[j]],
+    alpha_cut_off = 0.95, rm.zero = TRUE)
+  eer_ = count_stat[[j]]$eer
+  fname = sprintf( "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",colnames_[indices[j]] )
+
+  ggsave(fname, plot = last_plot())
+  
+}
+
+eer_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$eer)})) )
+pos_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$pos)})) )
+neg_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$neg)})) )
+
+eer_table = tibble(Column = colnames_[indices], eer = eer_,`# pos` = pos_, `# neg` = neg_)
+write_csv(eer_table, 'num_eer_analysis.csv')
+
+```
+
+## Bivariate stat for numerical variables
+
+```{r}
+config_ = final_config %>% filter( Type=="numerical" 
+                             | Type =="key" | Column =="discontinue_flg")
+
+write_csv(config_, "var_config_numeric.csv")
+
+
+data_ = combined %>%   select(matches(paste(config_$Column, collapse="|")))
+
+bivar_stats_y_flag(input = data_, #as.data.frame(numeric(data__)), 
+  var_config = "D:/Data/QC/var_config_numeric.csv",
+  outcome_var = "discontinue_flg",
+  output_dir = "D:/Data/QC/bivar_stats_num")
+```

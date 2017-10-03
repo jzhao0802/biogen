@@ -1,0 +1,202 @@
+---
+title: "Process data dictionary"
+author: "Norman Poh"
+date: "27 September 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Init
+```{r}
+setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/loading")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+source("../lib/cut_linux.R")
+
+
+# Using Windows prompt, map the data folder to D drive, e.g., 
+# net use D: \\localhost\C$\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```
+## Load the previous data dictionary that I have processed
+```{r}
+config_old = read_csv("D:/Results/var_config/combined_data_var_config.csv")
+
+description = hashmap(str_to_lower(config_old$Column), config_old$Description)
+isdate = hashmap(str_to_lower(config_old$Column), config_old$isdate)
+var_grouping = hashmap(str_to_lower(config_old$Column), config_old$var_grouping)
+var_type = hashmap(str_to_lower(config_old$Column), config_old$Type)
+var_period = hashmap(str_to_lower(config_old$Column), config_old$var_period)
+
+  
+```
+## Load the new data dictionary
+
+```{r}
+# Load the current dictionary
+dict = read_csv('D:/Data/Flat_File_v5/profiling_variables.csv')
+
+dict$`Variable name` = str_to_lower(dict$`Variable name`)
+
+# clean the dictionary
+dict$`Variable name` = cut_linux(dict$`Variable name`, field = 1, delimiter = " ")
+out_ = str_detect(dict$`Variable name`, "^do|^not") | is.na(dict$`Variable name`)
+dict = filter(dict, ! out_) 
+
+#create pre and post var into the dictionary
+var_name_pre = dict$`Variable name`[str_detect(dict$`Variable name`, '^pre|pre$')]
+var_name_post = str_replace(var_name_pre, 'pre', 'post')
+  
+#Description = hashmap(dict$`Variable name`, dict$Description)
+
+dict$`Profiling Variable Groupings` = as.factor(dict$`Profiling Variable Groupings`)
+
+levels(dict$`Profiling Variable Groupings`)
+```
+
+## Load the patient data
+
+```{r}
+var_config_generator(
+  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data.csv",
+  prefix = "biogen_new_patient_",
+  output_dir = "D:/Results/var_config/")
+
+config_p = read_csv("D:/Results/var_config/biogen_new_patient_var_config.csv")
+
+config_p$Column = str_to_lower(config_p$Column)
+
+```
+
+## Load the doctor (physician) data
+
+```{r}
+var_config_generator(
+  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_PHYS_DATA.csv",
+  prefix = "biogen_new_doctor_",
+  output_dir = "D:/Results/var_config/")
+
+config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
+
+config_d$Column = str_to_lower(config_d$Column)
+
+```
+## Data-dictionary-level QC
+
+
+```{r}
+
+print(sprintf("Patient data has %d variables.", length(config_p$Column) ))
+print(sprintf("Doctor (physician) data has %d variables.", length(config_d$Column) ))
+print(sprintf("Data dictionary has %d variables.", length(dict$`Variable name`)  ))
+
+  
+# Do this first: add key -- otherwise the file won't load
+print("The variables in the combined patient and physician data but have no description in the data dictionary are:")
+
+# the missing variables above are aparently due to pre-post issues. So, let's attempt to recover this by using pre (resp. post) version of the var.
+
+sum(str_detect(dict$`Variable name`, '^post')) # there is no var name with post!
+
+var_name_pre = dict$`Variable name`[str_detect(dict$`Variable name`, '^pre|pre$')]
+var_name_post = str_replace(var_name_pre, 'pre', 'post')
+
+
+missing_var_list = setdiff(union(config_p$Column,config_d$Column), 
+                           union(var_name_post, dict$`Variable name`))
+
+missing_var_list
+
+missing_var_list = setdiff(dict$`Variable name`, 
+                           union(config_p$Column,config_d$Column))
+missing_var_list
+
+# compare with the old files
+var_in_files = str_to_lower( union(config_p$Column,config_d$Column) )
+
+#check if they are in the dictionary
+#description[[var_in_files]]
+print("variables with no descriptions are")
+var_w_no_desc = ! description$has_keys(var_in_files)
+var_in_files[var_w_no_desc]
+
+```
+
+
+## create the config file 
+
+```{r}
+description_p = read_csv("D:/Data/Flat_File_v5/BGN_1158015_contents.csv")
+config_p$Description = ""
+config_p$Description[ description_p$`#` ] = description_p$Label 
+
+config_p$Type[ str_detect(config_p$Column, "pat_id") ] = "key"
+
+#sum(!isdate$has_keys(config_p$Column))
+
+config_p$Type = ""
+config_p$Type = var_type[[config_p$Column]]
+
+config_p$isdate=FALSE
+isdate_ = str_detect(description_p$Format,'MMDDYY|DATE9')
+isdate_[ is.na(isdate_) ] = FALSE
+config_p$isdate [description_p$`#`] = isdate_
+
+config_p$var_grouping=""
+config_p$var_grouping = var_grouping[[config_p$Column]]
+
+config_p$var_period=""
+matched_ = str_detect( config_p$Column, "^pre|pre$")
+config_p$var_period[matched_] = "pre"
+matched_ = str_detect( config_p$Column, "^post|post$")
+config_p$var_period[matched_] = "post"
+config_p$var_period = as.factor(config_p$var_period)
+
+selected = str_detect(config_p$Column, "^flg|flg$")
+config_p$Column[selected]
+config_p$Type[selected] = "categorical"
+
+config_p$Type[config_p$isdate] = "others"
+
+write_csv(config_p, "D:/Results/var_config/biogen_new_patient_var_config.csv")
+```
+
+## Load doctor's var_config
+```{r}
+config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
+config_d$Column = str_to_lower(config_d$Column)
+
+description_d = read_csv("D:/Data/Flat_File_v5/BGN_1158015_contents_physician.csv")
+config_d$Description = ""
+config_d$Description[ description_d$`#` ] = description_d$Label 
+
+config_d$isdate=FALSE
+isdate_ = str_detect(description_d$Format,'MMDDYY|DATE9')
+isdate_[ is.na(isdate_) ] = FALSE
+config_d$isdate [description_d$`#`] = isdate_
+
+config_d$var_grouping="Physician Characteritics"
+
+config_d$var_period=""
+matched_ = str_detect( config_d$Column, "^pre|pre$")
+config_d$var_period[matched_] = "pre"
+matched_ = str_detect( config_d$Column, "^post|post$")
+config_d$var_period[matched_] = "post"
+config_d$var_period = as.factor(config_d$var_period)
+
+# Do this first: add key -- otherwise the file won't load
+config_d$Type[ str_detect(config_d$Column, "npi") ] = "key"
+config_d$Type[ str_detect(config_d$Column, "pat_id") ] = "others"
+
+write_csv(config_d,"D:/Results/var_config/biogen_new_doctor_var_config.csv")
+```

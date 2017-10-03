@@ -1,0 +1,237 @@
+---
+title: "Load data"
+author: "Norman Poh"
+date: "2 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Init
+```{r}
+setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/loading")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+source("../lib/cut_linux.R")
+source("../lib/config_with_colnames.R")
+
+# Using Windows prompt, map the data folder to D drive, e.g., 
+# net use D: \\localhost\C$\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```
+
+## load the data
+
+```{r}
+physician_ <- read_transform(
+  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_PHYS_DATA_unique_npi.csv",
+  var_config_csv = "D:/Results/var_config/biogen_new_doctor_var_config.csv",
+  read_key_as_double = FALSE
+)
+
+data_ <- read_transform(
+  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data_unique_pat_id.csv",
+  var_config_csv = "D:/Results/var_config/biogen_new_patient_var_config.csv",
+  read_key_as_double = FALSE
+)
+
+data_ <- read_transform(
+  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data_numeric_pat_id.csv",
+  var_config_csv = "D:/Results/var_config/biogen_new_patient_var_config.csv",
+  read_key_as_double = FALSE
+)
+
+#  There are 7851 entries but only 7748 unique values; 103 duplicate patients
+```
+
+```{r}
+dim(data_$data)
+dim(physician_$data)
+
+
+physician.npi = unique(physician_$data$npi)
+physician.npi = physician.npi[! is.na(physician.npi)]
+patient.npi = unique(data_$data$npi)
+patient.npi = patient.npi[! is.na(patient.npi)]
+setdiff(patient.npi, physician.npi)
+setdiff(physician.npi,patient.npi)
+common.npi = intersect(physician.npi,patient.npi)
+
+length(common.npi)
+
+data_patient = data_$data %>% filter(npi %in% common.npi)
+data_doctor =  physician_$data %>% filter(npi %in% common.npi) %>% select (-one_of('pat_id'))
+
+dim(data_patient)
+dim(data_doctor)
+
+combined_data = left_join(data_patient, data_doctor)
+dim(combined_data)
+colnames(combined_data)
+View(combined_data)
+
+saveRDS(combined_data, "D:/Data/Processed/combined_data.rds")
+```
+## Function to create date difference
+
+Please input only a dataframe full of dates into this function:
+
+```{r}
+
+
+create_date_diffs <- function(input, index_col = "index_date") {
+  #input is the data frame
+  date_cols <- input[, -which(colnames(input) == index_col)]
+  
+  date_diffs <- as.data.frame(sapply(date_cols, function(x) { 
+    x - input[[index_col]]
+    
+  }))
+  
+  return(date_diffs)
+}
+
+```
+## work on the combined data
+```{r}
+combined_data = readRDS("D:/Data/Processed/combined_data.rds")
+
+config_p = read_csv("D:/Results/var_config/biogen_new_patient_var_config.csv")
+config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
+combined_config = rbind(config_p, config_d %>% filter( ! (Column=='npi')))
+
+isdate = hashmap(combined_config$Column, combined_config$isdate)
+
+combined_data$yomsg = paste0('01/01/',combined_data$yomsg)
+isdate[['yomsg']] = TRUE
+
+combined_data$effective_year = paste0('01/01/',combined_data$effective_year)
+isdate[['effective_year']] = TRUE
+
+saveRDS(combined_data, "D:/Data/Processed/combined_data.rds")
+
+combined_config = config_with_colnames(colnames(combined_data), combined_config)
+
+dim(combined_config)
+dim(combined_data)
+
+saveRDS(combined_config, "D:/Data/Processed/combined_config.rds")
+
+```
+
+## create the date difference
+
+```{r}
+# work with the date variables only
+colnames_ = colnames(combined_data)
+
+date_ = combined_data %>% select(  matches(paste( colnames_[isdate[[colnames_]]], collapse="|")))
+
+colnames_datediff_var = colnames(date_)
+
+date__ <- as.data.frame(  sapply(date_, mdy))
+date_ = create_date_diffs(date__, index_col = "idx_dt")
+colnames_original = colnames(date_)
+colnames(date_) = paste0(colnames_original, '_diff')
+
+var_grouping = hashmap(combined_config$Column, combined_config$var_grouping)
+var_period = hashmap(combined_config$Column, combined_config$var_period)
+Description = hashmap(combined_config$Column, combined_config$Description)
+
+numUniqueValues = tibble(value = sapply(date_, function(x) {length(unique((x)))}))
+
+new_row = tibble(Column = colnames(date_), 
+       Type='numerical',
+       NumUniqueValues=numUniqueValues$value,
+       var_period = var_period[[colnames_original]],
+       var_grouping = var_grouping[[colnames_original]],
+       isdate=FALSE,
+       Description = paste0('Date difference between index and ',Description[[colnames_original]])
+       )
+
+combined_date_data = cbind(combined_data, date_)
+combined_date_config = rbind(combined_config, new_row)
+dim(combined_date_config)
+dim(combined_date_data)
+combined_config_data = config_with_colnames(combined_date_config, colnameslist=colnames(combined_date_data))
+
+dim(combined_date_config)
+dim(combined_date_data)
+
+saveRDS(combined_date_config, "D:/Data/Processed/combined_date_config.rds")
+saveRDS(combined_date_data, "D:/Data/Processed/combined_date_data.rds")
+
+write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
+write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
+
+```
+## derive new DMT variables
+
+```{r}
+#varlist = c('pre_medication_num4','pre_concom_cdes_num1','pre_concom_ndc_num2','pre_medication_num7','pre_concom_ndc_num4','pre_concom_ndc_num5','pre_concom_ndc_num6','pre_medication_num11','pre_medication_num12')
+
+#remove tecfidera pre_concom_ndc_num4
+varlist = c('pre_medication_num4','pre_concom_cdes_num1','pre_concom_ndc_num2','pre_medication_num7','pre_concom_ndc_num5','pre_concom_ndc_num6','pre_medication_num11','pre_medication_num12')
+
+data_row_sum = combined_date_data %>% select(one_of(varlist)) %>%
+   replace(is.na(.), 0)  %>% rowSums
+
+#get the first date variable and apply min
+varlist_diff = str_replace(varlist,'num','fst')
+varlist_diff = paste0(varlist_diff,'_diff')
+data_ = combined_date_data %>% select(one_of(varlist_diff))
+data_row_min <- apply(data_, 1, function(x) {min(x, na.rm=TRUE)} )
+
+#get the last date variable and apply max
+varlist_diff = str_replace(varlist,'num','lst')
+varlist_diff = paste0(varlist_diff,'_diff')
+data_ = combined_date_data %>% select(one_of(varlist_diff))
+data_row_max <- apply(data_, 1, function(x) {max(x, na.rm=TRUE)} ) 
+
+remove_inf <- function(x) {
+  x[is.infinite(x)] = NA
+  return(x)
+}
+
+data_row_max = remove_inf(data_row_max)
+data_row_min = remove_inf(data_row_min)
+
+data_ = tibble(pre_dmt_num = data_row_sum, pre_dmt_fst_diff = data_row_min, 
+       pre_dmt_lst_diff = data_row_max)
+
+numUniqueValues = tibble(value = sapply(data_, function(x) {length(unique((x)))}))
+
+new_row = tibble(Column = colnames(data_), 
+       Type='numerical',
+       NumUniqueValues=numUniqueValues$value,
+       var_period = "pre",
+       var_grouping = "Medications - MS Related (DMTs)",
+       isdate=FALSE,
+       Description = c('Total prescribed DMT pre index','Day difference between index and first date of DMT prescription in preindex period', 'Day difference between index and last date of DMT prescription in preindex period')
+       )
+
+
+combined_date_config = rbind(combined_date_config, new_row)
+combined_date_data = cbind(combined_date_data,data_)
+
+combined_date_config = config_with_colnames(combined_date_config, colnameslist=colnames(combined_date_data))
+
+dim(combined_date_config)
+dim(combined_date_data)
+
+saveRDS(combined_date_config, "D:/Data/Processed/combined_date_config.rds")
+saveRDS(combined_date_data, "D:/Data/Processed/combined_date_data.rds")
+
+write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
+write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
+
+
+```
