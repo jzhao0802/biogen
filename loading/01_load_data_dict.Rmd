@@ -30,7 +30,7 @@ source("../lib/cut_linux.R")
 ```
 ## Load the previous data dictionary that I have processed
 ```{r}
-config_old = read_csv("D:/Results/var_config/combined_data_var_config.csv")
+config_old = readRDS('D:/Data/Processed/combined_date_config.rds')
 
 description = hashmap(str_to_lower(config_old$Column), config_old$Description)
 isdate = hashmap(str_to_lower(config_old$Column), config_old$isdate)
@@ -44,7 +44,7 @@ var_period = hashmap(str_to_lower(config_old$Column), config_old$var_period)
 
 ```{r}
 # Load the current dictionary
-dict = read_csv('D:/Data/Flat_File_v5/profiling_variables.csv')
+dict = read_csv('D:/Data/Flat_File_v6/profiling_variables.csv')
 
 dict$`Variable name` = str_to_lower(dict$`Variable name`)
 
@@ -67,28 +67,42 @@ levels(dict$`Profiling Variable Groupings`)
 ## Load the patient data
 
 ```{r}
+
+raw = read_csv("D:/Data/Flat_File_v6/BGN_1158015_pat_data.csv",
+               col_types = (cols(PAT_ID = col_character(), .default = col_guess())))
+colnames(raw) = str_to_lower(colnames(raw))
+
+mapped = tibble(pat_id = raw$pat_id, mapped_id = 1:length(raw$pat_id))
+write_csv(mapped, "D:/Data/Flat_File_v6/mapped_id.csv")
+
+raw$pat_id=1:length(raw$pat_id)
+write_csv(raw, "D:/Data/Flat_File_v6/BGN_1158015_pat_data_lower.csv")
+
+
 var_config_generator(
-  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data.csv",
+  input_csv = "D:/Data/Flat_File_v6/BGN_1158015_pat_data_lower.csv",
   prefix = "biogen_new_patient_",
-  output_dir = "D:/Results/var_config/")
+  output_dir = "D:/Results/var_config")
 
 config_p = read_csv("D:/Results/var_config/biogen_new_patient_var_config.csv")
-
-config_p$Column = str_to_lower(config_p$Column)
-
 ```
 
 ## Load the doctor (physician) data
 
 ```{r}
+raw = read_csv("D:/Data/Flat_File_v6/BGN_1158015_PHYS_DATA.csv",
+               col_types = (cols(PAT_ID = col_character(), .default = col_guess())))
+colnames(raw) = str_to_lower(colnames(raw))
+
+raw_ = raw %>% group_by(npi)# %>% select( -one_of('pat_id'))
+write_csv(raw_, "D:/Data/Flat_File_v6/BGN_1158015_PHYS_DATA_unique_npi.csv")
+
 var_config_generator(
-  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_PHYS_DATA.csv",
+  input_csv = "D:/Data/Flat_File_v6/BGN_1158015_PHYS_DATA_unique_npi.csv",
   prefix = "biogen_new_doctor_",
   output_dir = "D:/Results/var_config/")
 
 config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
-
-config_d$Column = str_to_lower(config_d$Column)
 
 ```
 ## Data-dictionary-level QC
@@ -136,7 +150,7 @@ var_in_files[var_w_no_desc]
 ## create the config file 
 
 ```{r}
-description_p = read_csv("D:/Data/Flat_File_v5/BGN_1158015_contents.csv")
+description_p = read_csv("D:/Data/Flat_File_v6/BGN_1158015_contents.csv")
 config_p$Description = ""
 config_p$Description[ description_p$`#` ] = description_p$Label 
 
@@ -167,6 +181,9 @@ config_p$Column[selected]
 config_p$Type[selected] = "categorical"
 
 config_p$Type[config_p$isdate] = "others"
+config_p$Type[ str_detect(config_p$Column, "pat_id") ] = "key"
+config_p$Type[ str_detect(config_p$Column, "npi") ] = "others"
+
 
 write_csv(config_p, "D:/Results/var_config/biogen_new_patient_var_config.csv")
 ```
@@ -176,7 +193,7 @@ write_csv(config_p, "D:/Results/var_config/biogen_new_patient_var_config.csv")
 config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
 config_d$Column = str_to_lower(config_d$Column)
 
-description_d = read_csv("D:/Data/Flat_File_v5/BGN_1158015_contents_physician.csv")
+description_d = read_csv("D:/Data/Flat_File_v6/BGN_1158015_contents_physician.csv")
 config_d$Description = ""
 config_d$Description[ description_d$`#` ] = description_d$Label 
 

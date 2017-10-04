@@ -30,9 +30,9 @@ source('../lib/plot_cond_density.R')
 
 ```{r}
 combined = readRDS("D:/Data/Processed/combined_date_data.rds")
-config = readRDS("D:/Data/Processed/combined_date_config.rds")
+config = readRDS("D:/Data/Processed/combined_date_config_validated.rds")
 #write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
-#write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
+#write_csv(combined_date_config,"D:/Data/Processed/combined_date_config_validated.csv")
 
 var_config_generator(input_csv = "D:/Data/Processed/combined_date_data.csv",
                      prefix = "final_",
@@ -44,9 +44,11 @@ var_config_generator(input_csv = "D:/Data/Processed/combined_date_data.csv",
 
 ```{r}
 final_config = read_csv("D:/Data/Processed/final_var_config.csv")
-config = read_csv("D:/Data/Processed/combined_date_config.csv")
+config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
 
 sum(final_config$Column==config$Column)
+length(config$Column)
+
 #final_config$Type = config$Type
 final_config$Type[ final_config$Column=='pat_id' ] = 'key'
 final_config$Type[ config$isdate ] = 'others'
@@ -54,6 +56,7 @@ final_config$Type[ final_config$Column=='npi'] = 'others'
 
 #final_config$Column[str_detect(colnames(combined),'flg')]
 final_config$Type[ str_detect(colnames(combined),'flg')] = 'categorical'
+final_config$Description = config$Description
 
 write_csv(final_config, "D:/Data/Processed/final_var_config.csv")
 ```
@@ -69,11 +72,38 @@ View(univar_results$cat)
 
 ```
 ## remove variables that are poorly populated
+Variable	Problem
+pre_concom_gpif_fst8	Variable is 100% missing
+pre_concom_gpif_lst8	Variable is 100% missing
+pre_medication_fst11	Variable is 100% missing
+pre_medication_lst11	Variable is 100% missing
+pre_medication_fst13	Variable is 100% missing
+pre_medication_lst13	Variable is 100% missing
+pre_concom_gpif_fst8_diff	Variable is 100% missing
+pre_concom_gpif_lst8_diff	Variable is 100% missing
+pre_medication_fst11_diff	Variable is 100% missing
+pre_medication_lst11_diff	Variable is 100% missing
+pre_medication_fst13_diff	Variable is 100% missing
+pre_medication_lst13_diff	Variable is 100% missing
+pre_script_fst_diff	Variable is 100% missing
+pre_script_lst_dayssup_diff	Variable is 100% missing
+post_script_lst_dayssup_diff	Variable is 100% missing
+pre_concom_gpif_num8	Variable has only 1 unique value
+pre_medication_num11	Variable has only 1 unique value
+pre_medication_num13	Variable has only 1 unique value
+pre_concom_ndc_fst4_diff	Variable has only 1 unique value
+pre_concom_ndc_lst4_diff	Variable has only 1 unique value
+
 ```{r}
 var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
 
+length(var2remove)
+
 #remove the variables from data and from the config file
 final_config = final_config %>% filter( ! (final_config$Column %in% var2remove) )
+
+config = config %>% filter( ! (config$Column %in% var2remove) )
+
 
 #make correction
 final_config$Type[ str_detect(final_config$Column,'_diff$') ] = 'numerical'
@@ -106,7 +136,8 @@ bivariate_stats_cat(input = combined,
 #undebug(plot_cond_density)
 
 library(R.utils)
-final_config$Description = config$Description
+
+#final_config$Description == config$Description
 
 dim(final_config)
 dim(combined)
@@ -128,14 +159,14 @@ count_stat = vector(mode = "list", length = length(indices))
 mkdirs("D:/Data/QC/univar_cond")
 for (j in 1:length(indices)) {
   var_index = indices[j]
-  print( sprintf("%s", colnames_[indices[j]]))
-  final_config$Description[indices[j]]
+  print( sprintf("%s", colnames_[var_index]))
+  desc_ = final_config$Description[var_index]
   #print( quantile( as.matrix(combined_data[,indices[j]]), na.rm = TRUE) ) 
   count_stat[[j]] = plot_cond_density(combined, 
     var_index = indices[j], 
     target = combined$discontinue_flg,
     target_label = 'discon',
-    description = config$Description[indices[j]],
+    description = desc_,
     alpha_cut_off = 0.95, rm.zero = TRUE)
   eer_ = count_stat[[j]]$eer
   fname = sprintf( "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",colnames_[indices[j]] )
@@ -149,7 +180,7 @@ pos_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$pos)})) )
 neg_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$neg)})) )
 
 eer_table = tibble(Column = colnames_[indices], eer = eer_,`# pos` = pos_, `# neg` = neg_)
-write_csv(eer_table, 'num_eer_analysis.csv')
+write_csv(eer_table, 'D:/Data/QC/num_eer_analysis.csv')
 
 ```
 
@@ -159,7 +190,7 @@ write_csv(eer_table, 'num_eer_analysis.csv')
 config_ = final_config %>% filter( Type=="numerical" 
                              | Type =="key" | Column =="discontinue_flg")
 
-write_csv(config_, "var_config_numeric.csv")
+write_csv(config_, "D:/Data/QC/var_config_numeric.csv")
 
 
 data_ = combined %>%   select(matches(paste(config_$Column, collapse="|")))

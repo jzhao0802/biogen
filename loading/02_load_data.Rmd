@@ -31,25 +31,26 @@ source("../lib/config_with_colnames.R")
 ## load the data
 
 ```{r}
-physician_ <- read_transform(
-  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_PHYS_DATA_unique_npi.csv",
-  var_config_csv = "D:/Results/var_config/biogen_new_doctor_var_config.csv",
-  read_key_as_double = FALSE
-)
+# physician_ <- read_transform(
+#   input_csv = "D:/Data/Flat_File_v6/BGN_1158015_PHYS_DATA_unique_npi.csv",
+#   var_config_csv = "D:/Results/var_config/biogen_new_doctor_var_config.csv",
+#   read_key_as_double = FALSE
+# )
+
+physician__ = read_csv("D:/Data/Flat_File_v6/BGN_1158015_PHYS_DATA_unique_npi.csv",
+               col_types = (cols(PAT_ID = col_character(), .default = col_guess())))
+
+physician_ = list(data = physician__ %>% select( -one_of('pat_id')))  #%>% duplicated( by = npi)
+
+
+dim(physician_$data)
 
 data_ <- read_transform(
-  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data_unique_pat_id.csv",
+  input_csv = "D:/Data/Flat_File_v6/BGN_1158015_pat_data_lower.csv",
   var_config_csv = "D:/Results/var_config/biogen_new_patient_var_config.csv",
   read_key_as_double = FALSE
 )
 
-data_ <- read_transform(
-  input_csv = "D:/Data/Flat_File_v5/BGN_1158015_pat_data_numeric_pat_id.csv",
-  var_config_csv = "D:/Results/var_config/biogen_new_patient_var_config.csv",
-  read_key_as_double = FALSE
-)
-
-#  There are 7851 entries but only 7748 unique values; 103 duplicate patients
 ```
 
 ```{r}
@@ -58,9 +59,14 @@ dim(physician_$data)
 
 
 physician.npi = unique(physician_$data$npi)
-physician.npi = physician.npi[! is.na(physician.npi)]
+#physician.npi = physician.npi[! is.na(physician.npi)]
+
 patient.npi = unique(data_$data$npi)
-patient.npi = patient.npi[! is.na(patient.npi)]
+#patient.npi = patient.npi[! is.na(patient.npi)]
+
+length(physician.npi)
+length(patient.npi)
+
 setdiff(patient.npi, physician.npi)
 setdiff(physician.npi,patient.npi)
 common.npi = intersect(physician.npi,patient.npi)
@@ -68,17 +74,18 @@ common.npi = intersect(physician.npi,patient.npi)
 length(common.npi)
 
 data_patient = data_$data %>% filter(npi %in% common.npi)
-data_doctor =  physician_$data %>% filter(npi %in% common.npi) %>% select (-one_of('pat_id'))
+data_doctor =  physician_$data %>% unique(by=npi) %>% filter(npi %in% common.npi)
 
 dim(data_patient)
 dim(data_doctor)
 
 combined_data = left_join(data_patient, data_doctor)
 dim(combined_data)
-colnames(combined_data)
-View(combined_data)
+#colnames(combined_data)
+#View(combined_data)
 
 saveRDS(combined_data, "D:/Data/Processed/combined_data.rds")
+
 ```
 ## Function to create date difference
 
@@ -102,23 +109,26 @@ create_date_diffs <- function(input, index_col = "index_date") {
 ```
 ## work on the combined data
 ```{r}
-combined_data = readRDS("D:/Data/Processed/combined_data.rds")
+#combined_data = readRDS("D:/Data/Processed/combined_data.rds")
 
 config_p = read_csv("D:/Results/var_config/biogen_new_patient_var_config.csv")
 config_d = read_csv("D:/Results/var_config/biogen_new_doctor_var_config.csv")
-combined_config = rbind(config_p, config_d %>% filter( ! (Column=='npi')))
+combined_config = rbind(config_p, config_d %>% filter( ! (Column=='npi') | ! (Column=='npi')))
 
 isdate = hashmap(combined_config$Column, combined_config$isdate)
 
 combined_data$yomsg = paste0('01/01/',combined_data$yomsg)
+combined_data$yomsg [ str_detect(combined_data$yomsg,'NA') ] = NA
 isdate[['yomsg']] = TRUE
 
 combined_data$effective_year = paste0('01/01/',combined_data$effective_year)
+combined_data$effective_year [ str_detect(combined_data$effective_year,'NA') ] = NA
 isdate[['effective_year']] = TRUE
 
 saveRDS(combined_data, "D:/Data/Processed/combined_data.rds")
 
-combined_config = config_with_colnames(colnames(combined_data), combined_config)
+combined_config = config_with_colnames(combined_config,
+  colnameslist = colnames(combined_data))
 
 dim(combined_config)
 dim(combined_data)
@@ -172,6 +182,15 @@ saveRDS(combined_date_data, "D:/Data/Processed/combined_date_data.rds")
 write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
 write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
 
+
+```
+## Use the config that has been validated only
+----------------------------------------------------------------
+D:/Data/Processed/combined_date_config_validated.csv
+----------------------------------------------------------------
+```{r}
+
+combined_date_config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
 ```
 ## derive new DMT variables
 
@@ -222,16 +241,17 @@ new_row = tibble(Column = colnames(data_),
 combined_date_config = rbind(combined_date_config, new_row)
 combined_date_data = cbind(combined_date_data,data_)
 
-combined_date_config = config_with_colnames(combined_date_config, colnameslist=colnames(combined_date_data))
+combined_date_config = config_with_colnames(combined_date_config,
+   colnameslist=colnames(combined_date_data))
 
 dim(combined_date_config)
 dim(combined_date_data)
 
-saveRDS(combined_date_config, "D:/Data/Processed/combined_date_config.rds")
+saveRDS(combined_date_config, "D:/Data/Processed/combined_date_config_validated.rds")
 saveRDS(combined_date_data, "D:/Data/Processed/combined_date_data.rds")
 
 write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
-write_csv(combined_date_config,"D:/Data/Processed/combined_date_config.csv")
+write_csv(combined_date_config,"D:/Data/Processed/combined_date_config_validated.csv")
 
 
 ```
