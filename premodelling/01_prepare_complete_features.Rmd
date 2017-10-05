@@ -1,0 +1,123 @@
+---
+title: "Prepare complete features"
+author: "Norman Poh"
+date: "5 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+rm(list = ls())
+setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/premodelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+source("../lib/cut_linux.R")
+source("../lib/mystat.R")
+source('../lib/plot_cond_density.R')
+source('../lib/remove_na.R')
+```
+
+```{r}
+results_dir = "D:/Data/Processed/"
+```
+
+## Variable inclusion/exclusion criteria
+```{r}
+config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
+combined = readRDS("D:/Data/Processed/combined_date_data.rds")
+```
+
+## Derive new variables on the fly
+```{r}
+combined$effective_year_diff =  (mdy(combined$effective_year) - mdy(combined$idx_dt))/365.25
+
+numUniqueValues = length(unique((combined$effective_year_diff)))
+
+new_row = tibble(Column = 'effective_year_diff',
+                 Type = 'numerical',
+                 NumUniqueValues = numUniqueValues,
+                 Description = 'Effecitve years of service',
+                 isdate = FALSE,
+                 var_grouping = "Physician Characteritics",
+                 var_period = NA)
+
+config = rbind(config, new_row)
+
+dim(config)
+dim(combined)
+       
+```
+
+##  Eliminating variables
+```{r}
+eer_table = read_csv('D:/Data/QC/num_eer_analysis.csv')
+
+# eliminate var that is empty
+var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
+
+
+# eliminate variables based on others type
+config$Type[config$Column=='npi'] = 'others'
+config$Type[config$Column=='pat_id'] = 'key'
+config$Type[config$Column=='yob'] = 'others'
+config$Type[config$Column=='yomsg'] = 'others'
+config$Type[config$Column=='first_tec_rx'] = 'others'
+config$Type[config$Column=='effective_year'] = 'others'
+
+config$var_grouping[ config$Column=='pat_id'] = '' # added this in as the var_grouping info is wrong!
+
+var_others = config$Column[config$Type=='others']
+
+length(var_others)
+# EER and number of positivie criteria
+table.eliminate = eer_table %>% filter( (eer <0.04 |  `# pos`<=10 ) )
+
+# should get 123
+length(unique(  c(table.eliminate$Column, var2remove)))
+
+var2eliminate = unique(  c(table.eliminate$Column, var2remove, var_others) )
+
+length(var2eliminate)  
+
+config_ = config %>% filter( !(Column %in% var2eliminate  )) 
+combined_ = combined %>% select( -one_of(var2eliminate))
+
+length(config$Column)  
+length(config_$Column) 
+
+dim(combined_)
+dim(config_) 
+```
+## Summary
+
+I have worked out a list of variables to be eliminated on the basis of:
+1.	100% missing
+2.	Having only 1 unique value when it is a numerical variable 
+3.	Having no value for the positive class
+4.	Perfect separation on the basis of zero equal error rate; which indicates them being self-predictors. Three variables are: follow_up_end_dt_diff, disc_dt_diff, tot_dayssup_180)
+5.	Very low equal error rate but nonzero, again, due to being a self-predictor, e.g., the total number of tecfidera fills (sum_fill)
+6.	Having no more than 5 observed measurements for the positive class
+7.	Having no more than 10 observed measurements for the positive class
+
+In total, 123 variables are eliminated and so we have 324 usable variables in the end.
+
+## Write to files
+
+```{r}
+dim(combined_)
+dim(config_) 
+
+saveRDS(combined_, paste0(results_dir,'combined_date_322fea_data.rds'))
+saveRDS(config_, paste0(results_dir,'combined_date_322fea_config.rds'))
+
+```

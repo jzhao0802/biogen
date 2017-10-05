@@ -1,0 +1,81 @@
+---
+title: "Analyse model outputs"
+author: "Norman Poh"
+date: "5 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+path = "D:/Results/"
+
+models_dir = c('xgb_model_full','xgb_model_full_no_diff','xgb_model_no_post','xgb_model_no_post_no_diff','xgb_model_no_post_no_hcp','xgb_model_no_post_no_hcp_no_diff')
+```
+
+## 
+
+```{r}
+for (i in length(models_dir)) {
+  
+  path_ = paste0(path, models_dir[i],'/')
+  
+  model__ = paste0(path_,'XGB_preliminary_model.rds')
+  model = readRDS(model__)
+  
+  xgb.plot.tree(
+    plot_height = 1000,
+    model = model$learner.model,
+    n_first_tree = 0,
+    feature_names = model$features,
+  )
+  
+  fname = paste0(path_,'XGB_preliminary_model_tree.png')
+  ggsave(fname, plot = last_plot())
+  
+  tree_ = xgb.dump(model$learner.model,
+                   with_stats = T)
+  #                 fmap = model$features)
+  
+  #model__ = paste0(path_,'XGB_preliminary_model_tree.txt')
+  #write(tree_, file = model__)
+  #fea_ = tibble(node=paste0(1:length(model$features)),
+  #       variable = model$features)
+}
+```
+
+
+## Re-investigate the variables plus the flag variables which we did not do correctly before (rm.zero was set to TRUE!)
+```{r}
+
+colnames_ = colnames(combined)
+indices = which ( colnames_ == "tec_up" | str_detect(colnames_,'flg') )
+indices = setdiff(indices, which(colnames_ == "discontinue_flg"))
+colnames_[indices]
+count_stat = vector(mode = "list", length = length(indices))
+
+for (j in 1:length(indices)) {
+  var_index = indices[j]
+  config$Description[var_index]
+  count_stat[[j]] = plot_cond_density(combined, 
+    var_index = var_index, 
+    target = combined$discontinue_flg,
+    target_label = 'discon',
+    description = config$Description[var_index],
+    alpha_cut_off = 0.95, rm.zero = FALSE)
+  
+  #eer_ = count_stat[[j]]$eer
+  fname = sprintf( "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",colnames_[var_index] )
+  
+  ggsave(fname, plot = last_plot())
+}
+
+
+```
+
+##  
+```{r}
+
+```
