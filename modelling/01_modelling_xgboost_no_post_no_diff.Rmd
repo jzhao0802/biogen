@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+rm(list = ls())
 setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/modelling")
 library(palab)
 library(palabmod)
@@ -24,13 +25,13 @@ library(R.utils)
 source("../lib/cut_linux.R")
 source("../lib/mystat.R")
 source('../lib/plot_cond_density.R')
+
 ```
 
 ```{r}
-results_dir = "D:/Results/xgb_model_full/"
+results_dir = "D:/Results/xgb_model_no_post_no_diff/"
 mkdirs(results_dir)
 ```
-
 ## Variable inclusion/exclusion criteria
 ```{r}
 config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
@@ -74,8 +75,6 @@ config$Type[config$Column=='yomsg'] = 'others'
 config$Type[config$Column=='first_tec_rx'] = 'others'
 config$Type[config$Column=='effective_year'] = 'others'
 
-config$var_grouping[ config$Column=='pat_id'] = '' # added this in as the var_grouping info is wrong!
-
 var_others = config$Column[config$Type=='others']
 
 length(var_others)
@@ -111,7 +110,7 @@ I have worked out a list of variables to be eliminated on the basis of:
 
 In total, 123 variables are eliminated and so we have 324 usable variables in the end.
 
-## Do the modelling
+## Further exclude variables with post index and with diff
 
 ```{r}
 config_$var_grouping = as.factor(config_$var_grouping)
@@ -122,14 +121,23 @@ remove_na <- function(x) {
   return(x)
 }
 
-
 var_post = remove_na(config_$Column[ config_$var_period=='post' ])
 var_hcp = config_$Column [ config_$var_grouping == "Physician Characteritics" ]
+var_diff = config_$Column[ str_detect(config_$Column,'_diff') ]
 
 length(var_post)
 length(var_hcp)
+length(var_diff)
 
+var2eliminate = union(var_post, var_diff)
 
+config_ = config_ %>% filter( !(Column %in% var2eliminate  )) 
+combined_ = combined_ %>% select( -one_of(var2eliminate))
+
+dim(combined_)
+dim(config_) 
+
+#View(config_)
 ```
 
 ## Let's verify the data types
@@ -203,25 +211,23 @@ factor2numeric <- function(attribute) {
 write_csv(config_[c(key,selected_cat),],
   paste0(results_dir, "modelling_var_config_cat.csv"))
 
-exclude_hcp = FALSE
-if (! exclude_hcp) {
-  mschool = factor2numeric(combined_$medical_school_desc)
-  combined_$medical_school_desc = mschool$value
-  saveRDS(mschool$map,'D:/Results/attributes/mschool_map.rds')
-  
-  specialty = factor2numeric(combined_$specialty)
-  combined_$specialty = specialty$value
-  saveRDS(specialty$map,'D:/Results/attributes/specialty_map.rds')
-  
-  specialty_cat = factor2numeric(combined_$specialty_cat)
-  combined_$specialty_cat = specialty_cat$value
-  saveRDS(specialty_cat$map,'D:/Results/attributes/specialty_cat_map.rds')
-}
+mschool = factor2numeric(combined_$medical_school_desc)
+combined_$medical_school_desc = mschool$value
+saveRDS(mschool$map,'D:/Results/attributes/mschool_map.rds')
+
+specialty = factor2numeric(combined_$specialty)
+combined_$specialty = specialty$value
+saveRDS(specialty$map,'D:/Results/attributes/specialty_map.rds')
+
+specialty_cat = factor2numeric(combined_$specialty_cat)
+combined_$specialty_cat = specialty_cat$value
+saveRDS(specialty_cat$map,'D:/Results/attributes/specialty_cat_map.rds')
+
 
 combined_cat = dummy_vars(combined_ %>% 
   select( one_of(config_$Column[c(key,selected_cat)])),
   var_config = paste0(results_dir, 'modelling_var_config_cat.csv'))
-
+  
 combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
 
 combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
@@ -303,7 +309,7 @@ make_var_name <- function(colnamelist) {
   return( colnamelist )
 }
 ```
-## run full xgboost
+## run the xgboost
 
 ```{r}
 data = cbind(combined_cat, combined_num, combined_int)
