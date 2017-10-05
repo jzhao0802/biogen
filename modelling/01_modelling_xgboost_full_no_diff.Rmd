@@ -25,6 +25,7 @@ library(R.utils)
 source("../lib/cut_linux.R")
 source("../lib/mystat.R")
 source('../lib/plot_cond_density.R')
+source('../lib/remove_na.R')
 ```
 
 ```{r}
@@ -118,12 +119,6 @@ In total, 123 variables are eliminated and so we have 324 usable variables in th
 config_$var_grouping = as.factor(config_$var_grouping)
 levels(config_$var_grouping)
 
-remove_na <- function(x) {
-  x = x[! is.na(x)] 
-  return(x)
-}
-
-
 var_post = remove_na(config_$Column[ config_$var_period=='post' ])
 var_hcp = config_$Column [ config_$var_grouping == "Physician Characteritics" ]
 var_diff = config_$Column[ str_detect(config_$Column,'_diff') ]
@@ -191,23 +186,6 @@ var_cat = which(config_$Type=='categorical')
 
 ```
 
-## function
-```{r}
-factor2numeric <- function(attribute) {
-  attribute= as.factor(attribute)
-  attribute_levels = levels(attribute)
-  attribute_num = factor(
-    attribute,
-    levels = attribute_levels,
-    labels = sprintf("%03d", 1:length(attribute_levels))
-    )
-  
-  attribute_map = hashmap(levels(attribute_num), attribute_levels)
-  return(list(map=attribute_map, value=attribute_num))
-}
-
-
-```
 ## convert to dummy_vars for categorical variables
 ```{r}
 
@@ -241,79 +219,6 @@ combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
 
 ```
 
-## single-model xgb function
-```{r}
-
-write_xgb_model <- function(xgb_model, dataset, results_dir="./") {
-  # write out model:
-  saveRDS(xgb_model, paste0(results_dir, "XGB_preliminary_model.rds"))
-  
-  # VARIABLE IMPORTANCE -----------------------------------------------------
-  
-  # variable importance for the single model ----------------------------------
-  importance_model = xgb.importance(feature_names = xgb_model$features,
-                                     model = xgb_model$learner.model)
-  # convert to numeric in order to use in detailed xgb.importance:
-  train_numeric = as.data.frame(
-    sapply(dataset$env$data, function(x) { as.numeric(as.character(x)) }))
-  
-  detailed_imp = xgb.importance(
-    feature_names = xgb_model$features,
-    model = xgb_model$learner.model, 
-    data = as.matrix(train_numeric),
-    label = train_numeric$label)
-  
-  # write out:
-  write_csv(importance_model, 
-    paste0(results_dir, "VI_XGB_freq_singlemodel.csv"))
-  write_csv(detailed_imp,
-    paste0(results_dir,"Detailed_VI_XGB_freq_singlemodel.csv"))
-
-  # generate variable importance for each fold of the CV:
-  # for(i in 1:length(res$models)) {
-  #   importance_fold <- xgb.importance(feature_names = res$models[[i]]$features,
-  #                                     model = res$models[[i]]$learner.model)
-  #   write_csv(importance_fold, paste0(importance_dir, "VI_XGB_freq_fold_", i, ".csv"))
-  # }
-}
-
-
-analyse_res_cv <- function(res, results_dir = "./") {
-  # make pr curve:
-  pr_curve <- perf_binned_perf_curve(pred = res$pred, bin_num = 100)
-  
-  write_csv(pr_curve$curve, 
-    paste0(results_dir, "PRCurve_XGB_3fold_freq_100_bins.csv"))
-  
-  # ROCR pr curve:
-  perf_vs_thresh <- generateThreshVsPerfData(res$pred, measures = list(tpr, ppv))
-  
-  plotROCCurves(perf_vs_thresh)
-  ggsave(paste0(results_dir, "ROC_XGB_3fold.png"), plot = last_plot())
-  
-  write_csv(perf_vs_thresh$data, 
-    paste0(results_dir, "ROCR_PRCurve_XGB_3fold_freq.csv"))
-  saveRDS(res, paste0(results_dir, "res_XGB_3fold.rds"))
-  
-  # MEASURES ----------------------------------------------------------------
-  write_csv(res$measures.test, paste0(results_dir, "test_error_XGB_3fold.csv"))
-    
-}
-
-make_var_name <- function(colnamelist) {
-  
-  colnamelist = str_replace_all(colnamelist,' ','_')
-  colnamelist = str_replace_all(colnamelist,'-','_')
-  colnamelist = str_replace_all(colnamelist,'&','n')
-  colnamelist = str_replace_all(colnamelist,',','__')
-  colnamelist = str_replace(colnamelist,'\\(','_')
-  colnamelist = str_replace_all(colnamelist,'\\)','_')
-  colnamelist = str_replace_all(colnamelist,'\\/','_or_')
-  colnamelist = str_replace_all(colnamelist,'\\r','')
-  
-  return( colnamelist )
-}
-```
 ## run full xgboost
 
 ```{r}
