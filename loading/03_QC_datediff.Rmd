@@ -14,31 +14,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 
 
-mystat <- function(x) {
-  min_ = min(unlist(x), na.rm=TRUE)
-  max_ = max(unlist(x), na.rm=TRUE)
-  return(c(min=min_,max=max_))
-}  
+
 
 period_ = cut_linux(colnames(date_), field = 1, delimiter = "_");
 
-make_positive <- function(x) {
-  x[x< 0] = NA
-  return(x)
-}
-make_negative <- function(x) {
-  x[x> 0] = NA
-  return(x)
-}
-remove_inf <- function(x) {
-  x[is.infinite(x)] = NA
-  return(x)
-}
-
-remove_na <- function(x) {
-  x = x[! is.na(x)] 
-  return(x)
-}
 
 ```
 

@@ -87,26 +87,7 @@ dim(combined_data)
 saveRDS(combined_data, "D:/Data/Processed/combined_data.rds")
 
 ```
-## Function to create date difference
 
-Please input only a dataframe full of dates into this function:
-
-```{r}
-
-
-create_date_diffs <- function(input, index_col = "index_date") {
-  #input is the data frame
-  date_cols <- input[, -which(colnames(input) == index_col)]
-  
-  date_diffs <- as.data.frame(sapply(date_cols, function(x) { 
-    x - input[[index_col]]
-    
-  }))
-  
-  return(date_diffs)
-}
-
-```
 ## work on the combined data
 ```{r}
 #combined_data = readRDS("D:/Data/Processed/combined_data.rds")
@@ -214,11 +195,6 @@ varlist_diff = str_replace(varlist,'num','lst')
 varlist_diff = paste0(varlist_diff,'_diff')
 data_ = combined_date_data %>% select(one_of(varlist_diff))
 data_row_max <- apply(data_, 1, function(x) {max(x, na.rm=TRUE)} ) 
-
-remove_inf <- function(x) {
-  x[is.infinite(x)] = NA
-  return(x)
-}
 
 data_row_max = remove_inf(data_row_max)
 data_row_min = remove_inf(data_row_min)
