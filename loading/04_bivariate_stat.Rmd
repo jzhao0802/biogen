@@ -200,3 +200,33 @@ bivar_stats_y_flag(input = data_, #as.data.frame(numeric(data__)),
   outcome_var = "discontinue_flg",
   output_dir = "D:/Data/QC/bivar_stats_num")
 ```
+
+## Further filter out variables
+```{r}
+eer_table = read_csv('D:/Data/QC/num_eer_analysis.csv')
+
+windows2unix_path <- function (windows_path) {
+  return(str_replace(windows_path,'\\','/'))
+}
+  
+table_ = eer_table %>% filter( eer <=0.04 )
+write_csv(table_,'D:/Data/QC/var_removed_due_to_low_eer.csv')
+
+View(eer_table)
+table_ = eer_table %>% filter( eer >0.04 )
+
+table__ = table_ %>% filter( `# pos`<=5 )
+write_csv(table__,'D:/Data/QC/var_removed_due_to_npos_ls_05.csv')
+
+table__ = eer_table %>% filter( eer >0.04 ) %>% filter( `# pos` > 5 & `# pos`<=10 )
+write_csv(table__,'D:/Data/QC/var_removed_due_to_npos_ls_10.csv')
+
+```
+
+## remaining variables
+```{r}
+
+table.remaining = eer_table %>% filter( eer >0.04 ) %>% filter( `# pos`>10 ) 
+write_csv(table.remaining,'D:/Data/QC/var_remained.csv')
+
+```
