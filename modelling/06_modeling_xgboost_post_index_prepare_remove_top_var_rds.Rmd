@@ -31,6 +31,7 @@ library(hashmap)
 library(xgboost)
 library(R.utils)
 library(ROCR)
+library(pROC) # to calculate auc
 sourceDirectory("../lib")
 source("../lib/analyse_res_cv.R")
 source("../lib/write_xgb_model.R")
@@ -41,7 +42,7 @@ source("../lib/make_var_name.R")
 
 ```{r}
 
-results_dir = "D:/Results/modelling_03_post_index/"
+results_dir = "D:/Results/modelling_04_post_index_remove_top_var/"
 mkdirs(results_dir)
 ```
 
@@ -105,6 +106,10 @@ var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst
 # manually removed var
 var2remove_manually = c('age_group','tec_up','copay_tecfidera','copay_avg_norm','post_script_lst_diff','post_script_lst_dayssup')
 
+var2remove_manually_additional = 'post_lab_radio_date_fst_diff' #c('post_lab_radio_date_fst_diff','post_mgmt_date_fst_diff','post_other_outpat_date_fst_diff')
+
+
+
 # var of others Type are to be removed
 var_others = config$Column[config$Type=='others']
 length(var_others)
@@ -136,7 +141,7 @@ var_comdx_diff = config$Column [ config$var_grouping == "Co-morbidities - Genera
   & str_detect(config$Column, '_diff$')]
 
 var2eliminate = unique(  c(table.eliminate$Column, var2remove, 
-  var_others, var_fst_pre, var_lst_post, var_comdx_diff, var2remove_manually) )
+  var_others, var_fst_pre, var_lst_post, var_comdx_diff, var2remove_manually, var2remove_manually_additional) )
 
 var_stat = c(length(var_fst_pre), 
   length(var_lst_post), length(var_comdx_diff), length(var2remove_manually))
@@ -161,11 +166,11 @@ dim(config_)
 
 # save the variable list for audit purposes
 config$isIncluded = config$Column %in% config_$Column
-mkdirs('D:/Results/modelling_03_post_index/Data')
-write_csv(config, 'D:/Results/modelling_03_post_index/Data/config_isIncluded.csv')
+mkdirs('D:/Results/modelling_04_post_index_remove_top_var/Data')
+write_csv(config, 'D:/Results/modelling_04_post_index_remove_top_var/Data/config_isIncluded.csv')
 
 #for audit use and subsequent experiments
-saveRDS(combined_, 'D:/Results/modelling_03_post_index/Data/combined_.rds')
+saveRDS(combined_, 'D:/Results/modelling_04_post_index_remove_top_var/Data/combined_.rds')
 
 ```
 
@@ -207,7 +212,7 @@ var2use[[4]] = c(var_everything_else, var_pre, var_post, var_hcp)
 cname =c('basic','basic_hcp','basic_post', 'basic_post_hcp' )
 
 #for audit use
-write_csv(config_, 'D:/Results/modelling_03_post_index/Data/config_.csv')
+write_csv(config_, 'D:/Results/modelling_04_post_index_remove_top_var/Data/config_.csv')
 
 ```
 ## additional correction for the labelling; if we don't make these changes, mlr will complain!
@@ -228,7 +233,7 @@ combined$specialty_cat = specialty_cat$value
 ```{r}
 for (i in 1:4) {
   
-  results_dir_  = paste0('D:/Results/modelling_03_post_index/xgb_complied_', cname[i],'/')
+  results_dir_  = paste0('D:/Results/modelling_04_post_index_remove_top_var/xgb_complied_', cname[i],'/')
   mkdirs(results_dir_)
   
   config_ = config %>% filter( (Column %in% var2use[[i]]  )) 

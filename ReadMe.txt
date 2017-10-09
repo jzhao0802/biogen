@@ -20,3 +20,6 @@ subst L: F:\Norman\Biogen_Tecf2017_round5
 
 
 pre_comdx_lst2_diff
+
+xgb_universe_basic/  xgb_universe_basic_diff/  xgb_universe_basic_hcp/  xgb_universe_basic_hcp_diff/
+
