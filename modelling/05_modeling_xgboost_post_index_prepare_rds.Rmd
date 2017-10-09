@@ -31,9 +31,15 @@ library(hashmap)
 library(xgboost)
 library(R.utils)
 sourceDirectory("../lib")
+source("../lib/analyse_res_cv.R")
+source("../lib/write_xgb_model.R")
+source("../lib/factor2numeric.R")
+source("../lib/make_var_name.R")
+
 ```
 
 ```{r}
+
 results_dir = "D:/Results/modelling_03_post_index/"
 mkdirs(results_dir)
 ```
@@ -41,7 +47,7 @@ mkdirs(results_dir)
 ## Load the original variables
 
 ```{r}
-config = read_csv("D:/Data/Processed/combined_date_complied_config.rds")
+config = readRDS("D:/Data/Processed/combined_date_complied_config.rds")
 combined = readRDS("D:/Data/Processed/combined_date_complied_data.rds")
 ```
 ## Correct variables
@@ -158,60 +164,147 @@ mkdirs('D:/Results/modelling_03_post_index/Data')
 write_csv(config, 'D:/Results/modelling_03_post_index/Data/config_isIncluded.csv')
 
 #for audit use and subsequent experiments
-write_csv(config_, 'D:/Results/modelling_03_post_index/Data/config_.csv')
 saveRDS(combined_, 'D:/Results/modelling_03_post_index/Data/combined_.rds')
 
 ```
 
-We are left with 159 variables in the end
+We are left with 203 variables in the end (including the key or pat_id)
 
 ## Divide data HCP, count, diff
 
 ```{r}
+var_hcp = config_$Column [ config_$var_grouping == "Physician Characteritics" ]
 
+#var_post = config_$Column [ config_$var_period == "post" ]
+
+#diff variables excluding HCP
+#var_diff_pre = config_$Column[ str_detect(config_$Column,'_diff') &  config_$var_period == "pre"]
+#var_diff_post = config_$Column[ str_detect(config_$Column,'_diff') &  config_$var_period == "post"]
+#var_num_post = config_$Column[ str_detect(config_$Column,'num') &  config_$var_period == "post"]
+#var_diff_pre = setdiff(var_diff_pre, var_hcp)
+#var_diff_post = setdiff(var_diff_post, var_hcp)
+
+var_pre = config_$Column [config_$var_period == "pre"]
+var_post = config_$Column [config_$var_period == "post"]
+
+var_everything_else = setdiff(config_$Column, 
+  union(union(var_hcp, var_pre), var_post))
+  #union(union(union(var_hcp, var_diff_pre),var_diff_post), var_num_post))
+
+config_$is_hcp= config_$Column %in% var_hcp
+config_$is_pre= config_$Column %in% var_pre
+config_$is_post= config_$Column %in% var_post
+config_$is_everything_else = config_$Column %in% var_everything_else
+
+
+var2use = vector('list',4)
+var2use[[1]] = c(var_everything_else, var_pre)
+var2use[[2]] = c(var_everything_else, var_pre, var_hcp)
+var2use[[3]] = c(var_everything_else, var_pre, var_post)
+var2use[[4]] = c(var_everything_else, var_pre, var_post, var_hcp)
+
+cname =c('basic','basic_hcp','basic_post', 'basic_post_hcp' )
+
+#for audit use
+write_csv(config_, 'D:/Results/modelling_03_post_index/Data/config_.csv')
+
+```
+## additional correction for the labelling; if we don't make these changes, mlr will complain!
+```{r}
+mschool = factor2numeric(combined$medical_school_desc)
+combined$medical_school_desc = mschool$value
+
+specialty = factor2numeric(combined$specialty)
+combined$specialty = specialty$value
+
+specialty_cat = factor2numeric(combined$specialty_cat)
+combined$specialty_cat = specialty_cat$value
 
 ```
 
-## Let's pre-process the data by types
+## Experiments
 
 ```{r}
-config_ = read_csv("D:/Results/modelling/Data/config_.csv")
-combined_ = readRDS("D:/Results/modelling/Data/combined_.rds")
+for (i in 1:4) {
+  
+  results_dir_  = paste0('D:/Results/modelling_03_post_index/xgb_complied_', cname[i],'/')
+  mkdirs(results_dir_)
+  
+  config_ = config %>% filter( (Column %in% var2use[[i]]  )) 
+  combined_ = combined %>% select( one_of(var2use[[i]]))
+  dim(config_)
+  dim(combined_)
+  
+  
+  class_type = as.data.frame( sapply(combined_, class))
+  is_integer =class_type == "integer"
+  
+  key = which(config_$Type=="key")
+  
+  selected_num = which(config_$Type=="numerical" & ! is_integer)
+  selected_int = which(config_$Type=="numerical" & is_integer)
+  selected_cat = which(config_$Type=="categorical")
+  
+  selected_all = c(selected_cat, selected_int, selected_num)
 
-class_type = as.data.frame( sapply(combined_, class))
-is_integer =class_type == "integer"
+  var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
+  var_stat
+  sum(var_stat)
+  
+  # extrem value
+  write_csv(config_[c(key,selected_num),], 
+    paste0(results_dir_, 'modelling_var_config_num.csv'))
 
-key = which(config_$Type=="key")
+  combined_num = extreme_values(
+    combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
+    var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
+    pth = 0.99)
 
-selected_num = which(config_$Type=="numerical" & ! is_integer)
-selected_int = which(config_$Type=="numerical" & is_integer)
-selected_cat = which(config_$Type=="categorical")
+  combined_num = combined_num$data %>%   select( - one_of('pat_id'))
 
-selected_all = c(selected_cat, selected_int, selected_num)
+  #cat variable
+  write_csv(config_[c(key,selected_cat),],
+    paste0(results_dir_, "modelling_var_config_cat.csv"))
 
-var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
-var_stat
-sum(var_stat)
+
+  combined_cat = dummy_vars(combined_ %>% 
+    select( one_of(config_$Column[c(key,selected_cat)])),
+    var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'))
+    
+  combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
+  
+  #integer variable
+  combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
+  
+  #now we have: combined_num, combined_cat, combined_int, so we can run xgboost
+  data = cbind(combined_cat, combined_num, combined_int)
+  data$label = data$discontinue_flg_1_0
+  data$discontinue_flg_1_0 = NULL
+  
+  data$label = as.factor(data$label)
+  table(data$label)
+  
+  colnames_ = make_var_name(colnames(data))
+  colnames(data) = colnames_
+  
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+  
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
+  
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
+  
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  analyse_res_cv(res, results_dir = results_dir_)
+  
+  # train a single model
+  xgb_model <- train(learner = lrn_xgb, task = dataset)
+  
+  write_xgb_model(xgb_model, results_dir = results_dir_, dataset = dataset)
+
+}
 
 ```
-
-
-## Experimental setting
-
-The experiments consist of:
-1.	All feature set - the Universe - with count, with date diff, with HCP - the full model (w.r.t the defined universe, of course)
-2.	with count, no date diff, no HCP (the simplest model)
-3.	with count, no date diff, with HCP
-4.	with count, with date diff, no HCP
-
-Having further thought about the experiment designs, I think that it does not make sense to exclude count features as they are the most basic ones of all (i.e., they are the de facto approach and very easy to derive). If we don't use them, we have to justify why. 
-
-I would rather focus on the hypotheses below:
-
-.	What is the predictive performance of a baseline system? (the simpliest model with counts only)
-.	Does the prediction improve with HCP features? And if so, by how much w.r.t. the baseline? 
-.	Does the prediction improve with the pre-index date difference features? And if so, by how much?
-.	What is the predictive performance of the full system? (the full system defined within the universe of features)
-
-Let me know if I have missed anything.
-

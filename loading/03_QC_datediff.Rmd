@@ -97,7 +97,7 @@ for (i in 1:ncol(date_)) {
 stat_ = as.data.frame(t((sapply(date_, mystat))))
 ```
 
-## Calculate date difffor the variables that are non-compliant
+## Calculate date diff for the variables that are non-compliant
 ```{r}
 
 date_ = combined %>% select(  one_of(c(var_non_compliant, 'idx_dt')))
@@ -146,15 +146,42 @@ fname = "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond
 
 ggsave(fname, plot = last_plot())
 ```
+```{r}
+var_non_compliant = c('post_dme_fst','post_script_lst','post_ip_date_lst','post_er_date_lst','post_mgmt_date_lst','post_lab_radio_date_lst','post_other_outpat_date_lst','post_dme_lst','post_ip_date_fst','post_er_date_fst','post_mgmt_date_fst','post_lab_radio_date_fst','post_other_outpat_date_fst')
 
-#for (i in 1:ncol(date_)) {
-#  d_=tibble(x=remove_na(date_[,i]))
-#  gg=ggplot(d_) + aes(x) + geom_density(alpha = .2) + xlab(colnames_[i])
-#  print(gg)
-#}
+var_non_compliant = paste0(var_non_compliant,'_diff')
+
+indices = which(config$Column %in% var_non_compliant)
+colnames_=colnames(combined)
+
+count_stat = vector('list', length(indices))
+for (j in 1:length(indices)) {
+  var_index = indices[j]
+  print( sprintf("%s", colnames_[var_index]))
+  desc_ = config$Description[var_index]
+  #print( quantile( as.matrix(combined_data[,indices[j]]), na.rm = TRUE) ) 
+  count_stat[[j]] = plot_cond_density(combined, 
+    var_index = indices[j], 
+    target = combined$discontinue_flg,
+    target_label = 'discon',
+    description = desc_,
+    alpha_cut_off = 0.95, rm.zero = TRUE)
+  eer_ = count_stat[[j]]$eer
+  fname = sprintf( "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",colnames_[indices[j]] )
+
+  ggsave(fname, plot = last_plot())
+  
+}
+
+eer_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$eer)})) )
+pos_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$pos)})) )
+neg_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$neg)})) )
+
+eer_table = tibble(Column = colnames_[indices], eer = eer_,`# pos` = pos_, `# neg` = neg_)
+write_csv(eer_table, 'D:/Data/QC/num_eer_analysis_complied.csv')
+
+
 ```
-
-
 
 
 

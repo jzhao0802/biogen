@@ -138,18 +138,21 @@ bivariate_stats_cat(input = combined,
 library(R.utils)
 
 #final_config$Description == config$Description
+config = readRDS("D:/Data/Processed/combined_date_complied_config.rds")
+combined = readRDS("D:/Data/Processed/combined_date_complied_data.rds")
 
-dim(final_config)
+
+dim(config)
 dim(combined)
 
 colnames_ = colnames(combined)
 
-# selected_var = (final_config$Type=="numerical" |
-#   final_config$var_type == "date-difference" ) & 
-#   ! str_detect(final_config$Column, "NPI|age_group|HCE_ID")
+# selected_var = (config$Type=="numerical" |
+#   config$var_type == "date-difference" ) & 
+#   ! str_detect(config$Column, "NPI|age_group|HCE_ID")
 
-selected_var = final_config$Type=="numerical" &
-   ! str_detect(final_config$Column, "npi|age_group|hce_id")
+selected_var = config$Type=="numerical" &
+   ! str_detect(config$Column, "npi|age_group|hce_id")
         
 indices = which(selected_var)
 colnames_[indices]
@@ -160,7 +163,7 @@ mkdirs("D:/Data/QC/univar_cond")
 for (j in 1:length(indices)) {
   var_index = indices[j]
   print( sprintf("%s", colnames_[var_index]))
-  desc_ = final_config$Description[var_index]
+  desc_ = config$Description[var_index]
   #print( quantile( as.matrix(combined_data[,indices[j]]), na.rm = TRUE) ) 
   count_stat[[j]] = plot_cond_density(combined, 
     var_index = indices[j], 
