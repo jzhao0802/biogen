@@ -1,0 +1,223 @@
+---
+title: "Modelling with the agreed universe of features"
+author: "Norman Poh"
+date: "6 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+sourceDirectory("../lib")
+```
+
+```{r}
+results_dir = "D:/Results/modelling/xgb_universe_full/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
+combined = readRDS("D:/Data/Processed/combined_date_data.rds")
+```
+## Correct variables
+
+```{r}
+combined$tec_activation_group =str_replace(combined$tec_activation_group,'\\r','')
+combined$tec_activation_group [ combined$tec_activation_group=="" ] = NA
+combined$tec_activation_group = as.factor(combined$tec_activation_group)
+levels(combined$tec_activation_group)
+```
+
+## Correct the config file since we based our var-removal criteria based on these
+
+```{r}
+# vars of Type others are to be ignored
+others_var = c('npi', 'yob', 'yomsg', 'first_tec_rx', 'effective_year')
+config$Type[config$Column %in% others_var] = 'others'
+
+# key is to be removed prior to modelling
+config$Type[config$Column=='pat_id'] = 'key'
+
+# so as ID
+config$var_grouping[ config$Column=='pat_id'] = 'id'
+
+# correct the period variable -- since post-index variables are to be removed later on
+post_var = c('tec_up','copay_tecfidera','copay_avg_norm')
+config$var_period[config$Column %in% post_var] = 'post'
+
+```
+##  Eliminating variables
+
+The universe of features consists of  "all counts + HCP + last date of date difference in the pre-index period except co-morbidities, and except post-index variables (which include tec_up, copay, etc)"
+
+If we retain the "last date of date difference in the pre-index period", that means we eliminate the "first date difference variables in the pre-index period"
+
+### Summary
+
+I have worked out a list of variables to be eliminated on the basis of:
+1.	100% missing
+2.	Having only 1 unique value when it is a numerical variable 
+3.	Having no value for the positive class
+4.	Perfect separation on the basis of zero equal error rate; which indicates them being self-predictors. Three variables are: follow_up_end_dt_diff, disc_dt_diff, tot_dayssup_180)
+5.	Very low equal error rate but nonzero, again, due to being a self-predictor, e.g., the total number of tecfidera fills (sum_fill)
+6.	Having no more than 5 observed measurements for the positive class
+7.	Having no more than 10 observed measurements for the positive class
+
+In total, 123 variables are eliminated and so we have 321 usable variables in the end (plus 1 for pat_id)
+
+### Further elimination based on the agreed universal feature
+
+The implementation of this is based on:
+
+1. All post-index var are to be removed
+2. var with fst (First) in the pre-index period are to be removed (var with last date-diff at pre-index is hence retained)
+3. Var with co-morbidities date difference are to be removed
+
+This is in addition to:
+* Variables of 'others' data type
+
+So, we are left with 164 variables in the end -- see below
+
+```{r}
+eer_table = read_csv('D:/Data/QC/num_eer_analysis.csv')
+
+# eliminate var that is empty
+var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
+
+# manually removed var
+var2remove_manually = 'age_group'
+
+# var of others Type are to be removed
+var_others = config$Column[config$Type=='others']
+length(var_others)
+
+# Elimination based on EER and number of positivie criteria
+table.eliminate = eer_table %>% filter( (eer <0.04 |  `# pos`<=10 ) )
+
+# should get 123 at this point
+length(unique(  c(table.eliminate$Column, var2remove)))
+
+# All post-index var are to be removed
+var_post = config$Column[config$var_period=='post']
+
+# var with fst (First) in the pre-index period are to be removed
+var_fst_pre = config$Column [ str_detect(config$Column, 'fst') 
+  & str_detect(config$Column, 'pre') ]
+
+# var with lst (Last) in the pre-index period are to be removed? We just calculate them for now
+var_lst_post = config$Column [ str_detect(config$Column, 'lst') 
+  & str_detect(config$Column, 'post') ]
+
+# var with co-morbidities date difference are to be removed
+var_comdx_diff = config$Column [ config$var_grouping == "Co-morbidities - General" 
+  & str_detect(config$Column, '_diff$')]
+
+var2eliminate = unique(  c(table.eliminate$Column, var2remove, 
+  var_others, var_fst_pre, var_post, var_comdx_diff, var2remove_manually) )
+
+length(var2eliminate)  
+```
+
+## remove the variables!
+
+
+```{r}
+config_ = config %>% filter( !(Column %in% var2eliminate  )) 
+combined_ = combined %>% select( -one_of(var2eliminate))
+
+length(config$Column)  
+length(config_$Column) 
+
+dim(combined_)
+dim(config_) 
+
+# save the variable list for audit purposes
+config$included_in_universe = FALSE
+included_in_universe = config$Column %in% config_$Column
+config$included_in_universe = included_in_universe
+mkdirs('D:/Results/modelling/Data')
+write_csv(config, 'D:/Results/modelling/Data/config_included_in_universe.csv')
+
+#for audit use and subsequent experiments
+write_csv(config_, 'D:/Results/modelling/Data/config_.csv')
+saveRDS(combined_, 'D:/Results/modelling/Data/combined_.rds')
+
+```
+
+We are left with 159 variables in the end
+
+## Divide data HCP, count, diff
+
+```{r}
+
+
+```
+
+## Let's pre-process the data by types
+
+```{r}
+config_ = read_csv("D:/Results/modelling/Data/config_.csv")
+combined_ = readRDS("D:/Results/modelling/Data/combined_.rds")
+
+class_type = as.data.frame( sapply(combined_, class))
+is_integer =class_type == "integer"
+
+key = which(config_$Type=="key")
+
+selected_num = which(config_$Type=="numerical" & ! is_integer)
+selected_int = which(config_$Type=="numerical" & is_integer)
+selected_cat = which(config_$Type=="categorical")
+
+selected_all = c(selected_cat, selected_int, selected_num)
+
+var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
+var_stat
+sum(var_stat)
+
+```
+
+
+## Experimental setting
+
+The experiments consist of:
+1.	All feature set - the Universe - with count, with date diff, with HCP - the full model (w.r.t the defined universe, of course)
+2.	with count, no date diff, no HCP (the simplest model)
+3.	with count, no date diff, with HCP
+4.	with count, with date diff, no HCP
+
+Having further thought about the experiment designs, I think that it does not make sense to exclude count features as they are the most basic ones of all (i.e., they are the de facto approach and very easy to derive). If we don't use them, we have to justify why. 
+
+I would rather focus on the hypotheses below:
+
+.	What is the predictive performance of a baseline system? (the simpliest model with counts only)
+.	Does the prediction improve with HCP features? And if so, by how much w.r.t. the baseline? 
+.	Does the prediction improve with the pre-index date difference features? And if so, by how much?
+.	What is the predictive performance of the full system? (the full system defined within the universe of features)
+
+Let me know if I have missed anything.
+

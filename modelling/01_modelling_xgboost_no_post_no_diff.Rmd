@@ -116,11 +116,6 @@ In total, 123 variables are eliminated and so we have 324 usable variables in th
 config_$var_grouping = as.factor(config_$var_grouping)
 levels(config_$var_grouping)
 
-remove_na <- function(x) {
-  x = x[! is.na(x)] 
-  return(x)
-}
-
 var_post = remove_na(config_$Column[ config_$var_period=='post' ])
 var_hcp = config_$Column [ config_$var_grouping == "Physician Characteritics" ]
 var_diff = config_$Column[ str_detect(config_$Column,'_diff') ]
@@ -188,23 +183,6 @@ var_cat = which(config_$Type=='categorical')
 
 ```
 
-## function
-```{r}
-factor2numeric <- function(attribute) {
-  attribute= as.factor(attribute)
-  attribute_levels = levels(attribute)
-  attribute_num = factor(
-    attribute,
-    levels = attribute_levels,
-    labels = sprintf("%03d", 1:length(attribute_levels))
-    )
-  
-  attribute_map = hashmap(levels(attribute_num), attribute_levels)
-  return(list(map=attribute_map, value=attribute_num))
-}
-
-
-```
 ## convert to dummy_vars for categorical variables
 ```{r}
 

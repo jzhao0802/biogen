@@ -9,17 +9,160 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Init
+```{r}
+setwd("L:/loading")
+
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(ROCR)
+source("../lib/cut_linux.R")
+source("../lib/mystat.R")
+source('../lib/plot_cond_density.R')
+source('../lib/create_date_diffs.R')
+source('../lib/remove_na.R')
+source('../lib/mystat.R')
+
+```
+
 ## we define a series of helper functions here to do QC of date difference
 
 ```{r}
-
-
 
 
 period_ = cut_linux(colnames(date_), field = 1, delimiter = "_");
 
 
 ```
+
+## load the data
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_data.rds")
+config = readRDS("D:/Data/Processed/combined_date_config_validated.rds")
+results_dir = "D:/Data/Processed_post_index/"
+mkdirs(results_dir)
+
+```
+## Set the post index variables
+
+```{r}
+# post index variables
+isdiff = str_detect(config$Column, '_diff$')
+
+selected_cols_ = which( config$isdate & config$var_period=="post" )
+
+colnames_ = config$Column[ selected_cols_ ]
+
+colnames_  = c(colnames_, 'disc_dt')
+# patients who discontinued
+selected_rows_ = which ( !is.na(combined$disc_dt) )
+
+# find out variables
+combined_date = combined %>% select(  one_of( colnames_))
+
+date__ <- as.data.frame(  sapply(combined_date, mdy))
+date_ = create_date_diffs(date__, index_col = "disc_dt")
+
+stat_ = as.data.frame(t((sapply(date_, mystat))))
+
+todelete = as.data.frame(  sapply(date_, function(x) {x>0}))
+
+# check with a specific example
+todelete$post_script_lst[5]
+combined$disc_dt[5]
+combined$post_script_lst[5]
+date_$post_script_lst[5]
+
+# process the todelete var to find non-compliant variables
+stat__ =  as.data.frame(sapply(todelete, function(x) {sum(x,  na.rm=TRUE)}) ) 
+stat__ = stat__$`sapply(todelete, function(x) {     sum(x, na.rm = TRUE) })`
+colnames_ = colnames(date_)
+var_non_compliant = colnames_[ stat__!= 0]
+
+var_non_compliant
+
+# ok, delete those
+for (i in 1:ncol(date_)) {
+  selected_rows_ = which(todelete[,i])
+  combined[selected_rows_,colnames_[i]] = NA
+  date_[selected_rows_,colnames_[i]] = NA
+}
+stat_ = as.data.frame(t((sapply(date_, mystat))))
+```
+
+## Calculate date difffor the variables that are non-compliant
+```{r}
+
+date_ = combined %>% select(  one_of(c(var_non_compliant, 'idx_dt')))
+
+colnames_datediff_var = colnames(date_)
+
+date__ <- as.data.frame(  sapply(date_, mdy))
+date_ = create_date_diffs(date__, index_col = "idx_dt")
+colnames_original = colnames(date_)
+colnames(date_) = paste0(colnames_original, '_diff')
+
+# Let's check them before overwriting -- should be zero or not available
+# pick one non-compliant var and check
+date_$post_other_outpat_date_lst_diff - combined$post_other_outpat_date_lst_diff
+
+# all good so we write back
+colnames_diff = colnames(date_)
+for (i in 1:length(colnames_diff)) {
+  combined[,colnames_diff[i]] = date_[, colnames_diff[i]] 
+}
+
+# saving the data
+saveRDS(combined, "D:/Data/Processed/combined_date_complied_data.rds")
+saveRDS(config, "D:/Data/Processed/combined_date_complied_config.rds")
+write_csv(config, "D:/Data/Processed/combined_date_complied_config.csv")
+
+dim(combined)
+dim(config)
+```
+
+
+```{r}
+table(combined$post_script_lst_dayssup [ combined$discontinue_flg==1],
+  combined$discontinue_flg[ combined$discontinue_flg==1])
+
+table(combined$post_script_lst_dayssup [ combined$discontinue_flg==0],
+  combined$discontinue_flg[ combined$discontinue_flg==0])
+
+combined$discontinue_flg = as.factor(combined$discontinue_flg)
+
+ggplot(combined) + aes(post_script_lst_dayssup, group=discontinue_flg,
+  fill=discontinue_flg) + geom_histogram(alpha = .2, bins=100) + 
+  xlab( config$Description[ config$Column == 'post_script_lst_dayssup'] )
+
+fname = "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__post_script_lst_dayssup_hist.png"
+
+ggsave(fname, plot = last_plot())
+```
+
+#for (i in 1:ncol(date_)) {
+#  d_=tibble(x=remove_na(date_[,i]))
+#  gg=ggplot(d_) + aes(x) + geom_density(alpha = .2) + xlab(colnames_[i])
+#  print(gg)
+#}
+```
+
+
+
+
+
+
+## STOP HERE
+
+
+
 
 ## check that all pre-index dates are negative
 ```{r}

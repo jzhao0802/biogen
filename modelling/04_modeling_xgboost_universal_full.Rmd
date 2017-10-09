@@ -1,0 +1,200 @@
+---
+title: "Modelling with the agreed universe of features"
+author: "Norman Poh"
+date: "6 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+sourceDirectory("../lib")
+source("../lib/analyse_res_cv.R")
+source("../lib/write_xgb_model.R")
+source("../lib/factor2numeric.R")
+
+```
+
+```{r}
+results_dir = "D:/Results/modelling/xgb_universe_full/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+
+config = read_csv("D:/Results/modelling/Data/config_.csv")
+combined = readRDS("D:/Results/modelling/Data/combined_.rds")
+```
+
+## Experimental setting
+
+The experiments consist of:
+1.	All feature set - the Universe - with count, with date diff, with HCP - the full model (w.r.t the defined universe, of course)
+2.	with count, no date diff, no HCP (the simplest model)
+3.	with count, no date diff, with HCP
+4.	with count, with date diff, no HCP
+
+Having further thought about the experiment designs, I think that it does not make sense to exclude count features as they are the most basic ones of all (i.e., they are the de facto approach and very easy to derive). If we don't use them, we have to justify why. 
+
+I would rather focus on the hypotheses below:
+
+.	What is the predictive performance of a baseline system? (the simpliest model with counts only)
+.	Does the prediction improve with HCP features? And if so, by how much w.r.t. the baseline? 
+.	Does the prediction improve with the pre-index date difference features? And if so, by how much?
+.	What is the predictive performance of the full system? (the full system defined within the universe of features)
+
+Let me know if I have missed anything.
+
+
+## Use the agreed universal model
+
+```{r}
+var_hcp = config$Column [ config$var_grouping == "Physician Characteritics" ]
+
+#diff variables excluding HCP
+var_diff = config$Column[ str_detect(config$Column,'_diff') ]
+var_diff = setdiff(var_diff, var_hcp)
+
+var_everything_else = setdiff(config$Column, union(var_hcp, var_diff))
+
+
+config$is_hcp= config$Column %in% var_hcp
+config$is_diff= config$Column %in% var_diff
+config$is_everything_else = config$Column %in% var_everything_else
+
+```
+
+## 
+
+```{r}
+
+var2use = vector('list',4)
+var2use[[1]] = var_everything_else
+var2use[[2]] = c(var_everything_else, var_hcp)
+var2use[[3]] = c(var_everything_else, var_diff)
+var2use[[4]] = c(var_everything_else, var_hcp, var_diff)
+
+is_hcp = c(FALSE, TRUE, FALSE, TRUE)
+cname =c('basic','basic_hcp','basic_diff', 'basic_hcp_diff' )
+```
+
+##
+
+```{r}
+for (i in 1:4) {
+  
+  results_dir_  = paste0('D:/Results/modelling/xgb_universe_', cname[i],'/')
+  mkdirs(results_dir_)
+  
+  config_ = config %>% filter( (Column %in% var2use[[i]]  )) 
+  combined_ = combined %>% select( one_of(var2use[[i]]))
+  dim(config_)
+  dim(combined_)
+  
+  #
+  class_type = as.data.frame( sapply(combined_, class))
+  is_integer =class_type == "integer"
+  
+  key = which(config_$Type=="key")
+  
+  selected_num = which(config_$Type=="numerical" & ! is_integer)
+  selected_int = which(config_$Type=="numerical" & is_integer)
+  selected_cat = which(config_$Type=="categorical")
+  
+  selected_all = c(selected_cat, selected_int, selected_num)
+
+  var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
+  var_stat
+  sum(var_stat)
+  
+  # extrem value
+  write_csv(config_[c(key,selected_num),], 
+    paste0(results_dir_, 'modelling_var_config_num.csv'))
+
+  combined_num = extreme_values(
+    combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
+    var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
+    pth = 0.99)
+
+  combined_num = combined_num$data %>%   select( - one_of('pat_id'))
+
+  #cat variable
+  write_csv(config_[c(key,selected_cat),],
+    paste0(results_dir_, "modelling_var_config_cat.csv"))
+
+  if (is_hcp[i]) {
+    mschool = factor2numeric(combined_$medical_school_desc)
+    combined_$medical_school_desc = mschool$value
+
+    specialty = factor2numeric(combined_$specialty)
+    combined_$specialty = specialty$value
+
+        specialty_cat = factor2numeric(combined_$specialty_cat)
+    combined_$specialty_cat = specialty_cat$value
+  }
+  
+  combined_cat = dummy_vars(combined_ %>% 
+    select( one_of(config_$Column[c(key,selected_cat)])),
+    var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'))
+    
+  combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
+  
+  #integer variable
+  combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
+  
+  #now we have: combined_num, combined_cat, combined_int, so we can run xgboost
+  data = cbind(combined_cat, combined_num, combined_int)
+  data$label = data$discontinue_flg_1_0
+  data$discontinue_flg_1_0 = NULL
+  
+  data$label = as.factor(data$label)
+  table(data$label)
+  
+  colnames_ = make_var_name(colnames(data))
+  colnames(data) = colnames_
+  
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+  
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
+  
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
+  
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  analyse_res_cv(res, results_dir = results_dir_)
+  
+  # train a single model
+  xgb_model <- train(learner = lrn_xgb, task = dataset)
+  
+  write_xgb_model(xgb_model, results_dir = results_dir_, dataset = dataset)
+  
+}
+
+```

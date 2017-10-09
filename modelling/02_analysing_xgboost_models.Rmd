@@ -9,6 +9,22 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## 
+
+```{r}
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(ROCR)
+```
+
+## 
+
 ```{r}
 path = "D:/Results/"
 
@@ -52,7 +68,13 @@ for (i in length(models_dir)) {
 
 colnames_ = colnames(combined)
 indices = which ( colnames_ == "tec_up" | str_detect(colnames_,'flg') )
+
+# exclude the discont flag
 indices = setdiff(indices, which(colnames_ == "discontinue_flg"))
+
+# add other var, especially those just created
+indices = c(indices, which ( colnames_ == "effective_year_diff" ))
+
 colnames_[indices]
 count_stat = vector(mode = "list", length = length(indices))
 
@@ -73,9 +95,18 @@ for (j in 1:length(indices)) {
 }
 
 
+eer_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$eer)})) )
+pos_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$pos)})) )
+neg_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$neg)})) )
+
+eer_table = tibble(Column = colnames_[indices], eer = eer_,`# pos` = pos_, `# neg` = neg_)
+write_csv(eer_table, 'D:/Data/QC/num_eer_analysis_additional.csv')
 ```
 
 ##  
 ```{r}
+install.packages("pROC")
+library(pROC)
+roc_obj <- roc(res$pred$data$response, res$pred$prob.1 )
 
 ```

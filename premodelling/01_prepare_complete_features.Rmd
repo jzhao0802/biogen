@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 ```{r}
 rm(list = ls())
-setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/premodelling")
+setwd("L:/premodelling")
 library(palab)
 library(palabmod)
 library(ggplot2)
@@ -21,10 +21,7 @@ library(tictoc)
 library(hashmap)
 library(xgboost)
 library(R.utils)
-source("../lib/cut_linux.R")
-source("../lib/mystat.R")
-source('../lib/plot_cond_density.R')
-source('../lib/remove_na.R')
+sourceDirectory("../lib")
 ```
 
 ```{r}
@@ -35,28 +32,12 @@ results_dir = "D:/Data/Processed/"
 ```{r}
 config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
 combined = readRDS("D:/Data/Processed/combined_date_data.rds")
-```
 
-## Derive new variables on the fly
-```{r}
-combined$effective_year_diff =  (mdy(combined$effective_year) - mdy(combined$idx_dt))/365.25
-
-numUniqueValues = length(unique((combined$effective_year_diff)))
-
-new_row = tibble(Column = 'effective_year_diff',
-                 Type = 'numerical',
-                 NumUniqueValues = numUniqueValues,
-                 Description = 'Effecitve years of service',
-                 isdate = FALSE,
-                 var_grouping = "Physician Characteritics",
-                 var_period = NA)
-
-config = rbind(config, new_row)
-
-dim(config)
 dim(combined)
-       
+dim(config)
+
 ```
+
 
 ##  Eliminating variables
 ```{r}
@@ -90,13 +71,17 @@ var2eliminate = unique(  c(table.eliminate$Column, var2remove, var_others) )
 length(var2eliminate)  
 
 config_ = config %>% filter( !(Column %in% var2eliminate  )) 
+combined = as_tibble(combined)
+
+
+
 combined_ = combined %>% select( -one_of(var2eliminate))
 
 length(config$Column)  
 length(config_$Column) 
 
 dim(combined_)
-dim(config_) 
+
 ```
 ## Summary
 
@@ -109,7 +94,8 @@ I have worked out a list of variables to be eliminated on the basis of:
 6.	Having no more than 5 observed measurements for the positive class
 7.	Having no more than 10 observed measurements for the positive class
 
-In total, 123 variables are eliminated and so we have 324 usable variables in the end.
+In total, 123 variables are eliminated and so we have 321 usable variables in the end.
+
 
 ## Write to files
 

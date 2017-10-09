@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Init
 ```{r}
-setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/loading")
+setwd("L:/loading")
 library(palab)
 library(palabmod)
 library(ggplot2)
@@ -20,8 +20,8 @@ library(stringr)
 library(lubridate)
 library(tictoc)
 library(hashmap)
-source("../lib/cut_linux.R")
-source("../lib/config_with_colnames.R")
+library(R.utils)
+sourceDirectory("../lib")
 
 # Using Windows prompt, map the data folder to D drive, e.g., 
 # net use D: \\localhost\C$\Users\npoh\Documents\myProjects\Biogen_Tecfidera
@@ -172,6 +172,8 @@ D:/Data/Processed/combined_date_config_validated.csv
 ```{r}
 
 combined_date_config = read_csv("D:/Data/Processed/combined_date_config_validated.csv")
+combined_date_data = readRDS("D:/Data/Processed/combined_date_data.rds")
+
 ```
 ## derive new DMT variables
 
@@ -222,12 +224,72 @@ combined_date_config = config_with_colnames(combined_date_config,
 
 dim(combined_date_config)
 dim(combined_date_data)
+```
+## Derive new variables last-minute
+```{r}
+combined_date_data$effective_year_diff =  as.numeric((mdy(combined_date_data$effective_year) - mdy(combined_date_data$idx_dt))/365.25)
+
+numUniqueValues = length(unique((combined_date_data$effective_year_diff)))
+
+config_row = tibble(Column = 'effective_year_diff',
+                 Type = 'numerical',
+                 NumUniqueValues = numUniqueValues,
+                 Description = 'Effecitve years of service',
+                 isdate = FALSE,
+                 var_grouping = "Physician Characteritics",
+                 var_period = NA)
+
+combined_date_config = rbind(combined_date_config, config_row)
+
+
+combined_date_config = config_with_colnames(combined_date_config,
+  colnameslist=colnames(combined_date_data))
+
+dim(combined_date_config)
+dim(combined_date_data)
+
+```
+
+## Correct the config file since we based our var-removal criteria based on these
+
+```{r}
+# vars of Type others are to be ignored
+others_var = c('npi', 'yob', 'yomsg', 'first_tec_rx', 'effective_year')
+combined_date_config$Type[combined_date_config$Column %in% others_var] = 'others'
+
+# key is to be removed prior to modelling
+combined_date_config$Type[combined_date_config$Column=='pat_id'] = 'key'
+
+# so as ID
+combined_date_config$var_grouping[ combined_date_config$Column=='pat_id'] = 'id'
+
+# correct the period variable -- since post-index variables are to be removed later on
+post_var = c('tec_up','copay_tecfidera','copay_avg_norm')
+combined_date_config$var_period[combined_date_config$Column %in% post_var] = 'post'
+
+```
+
+## Check for duplicated variables and remove them
+```{r}
+colnames_ = colnames(combined_date_data)
+dup_indices = which(duplicated(colnames_))
+combined_date_data[,dup_indices]=NULL
+combined_date_config = config[-dup_indices,]
+
+combined_date_config = config_with_colnames(combined_date_config, colnameslist=colnames(combined_date_data))
+
+dim(combined_date_data)
+dim(combined_date_config)
+```
+
+## saving
+
+```{r}
 
 saveRDS(combined_date_config, "D:/Data/Processed/combined_date_config_validated.rds")
 saveRDS(combined_date_data, "D:/Data/Processed/combined_date_data.rds")
 
 write_csv(combined_date_data,"D:/Data/Processed/combined_date_data.csv")
 write_csv(combined_date_config,"D:/Data/Processed/combined_date_config_validated.csv")
-
 
 ```

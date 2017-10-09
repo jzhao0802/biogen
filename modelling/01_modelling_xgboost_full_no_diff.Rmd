@@ -76,7 +76,7 @@ config$Type[config$Column=='yomsg'] = 'others'
 config$Type[config$Column=='first_tec_rx'] = 'others'
 config$Type[config$Column=='effective_year'] = 'others'
 
-config$var_grouping[ config$Column=='pat_id'] = '' # added this in as the var_grouping info is wrong!
+config$var_grouping[ config$Column=='pat_id'] = 'id' # added this in as the var_grouping info is wrong!
 
 var_others = config$Column[config$Type=='others']
 

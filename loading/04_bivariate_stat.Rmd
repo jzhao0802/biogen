@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Init
 ```{r}
-setwd("C:/Users/npoh/Documents/Git/projects/Biogen_Tecf2017_round5/loading")
+setwd("L:/loading")
 
 library(palab)
 library(palabmod)
