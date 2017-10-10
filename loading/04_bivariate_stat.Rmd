@@ -163,6 +163,12 @@ mkdirs("D:/Data/QC/univar_cond")
 for (j in 1:length(indices)) {
   var_index = indices[j]
   print( sprintf("%s", colnames_[var_index]))
+  
+  #Do not remove zero if the variable is a flag
+  if (str_detect(colnames_[var_index],'flg')) {
+    rm.zero_=FALSE
+  } else {rm.zero_=TRUE}
+  
   desc_ = config$Description[var_index]
   #print( quantile( as.matrix(combined_data[,indices[j]]), na.rm = TRUE) ) 
   count_stat[[j]] = plot_cond_density(combined, 
@@ -170,7 +176,7 @@ for (j in 1:length(indices)) {
     target = combined$discontinue_flg,
     target_label = 'discon',
     description = desc_,
-    alpha_cut_off = 0.95, rm.zero = TRUE)
+    alpha_cut_off = 0.95, rm.zero = rm.zero_)
   eer_ = count_stat[[j]]$eer
   fname = sprintf( "D:/Data/QC/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",colnames_[indices[j]] )
 
