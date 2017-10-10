@@ -32,11 +32,21 @@ library(xgboost)
 library(R.utils)
 library(ROCR)
 library(pROC) # to calculate auc
-sourceDirectory("../lib")
-source("../lib/analyse_res_cv.R")
-source("../lib/write_xgb_model.R")
-source("../lib/factor2numeric.R")
-source("../lib/make_var_name.R")
+
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
 
 ```
 
@@ -106,7 +116,8 @@ var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst
 # manually removed var
 var2remove_manually = c('age_group','tec_up','copay_tecfidera','copay_avg_norm','post_script_lst_diff','post_script_lst_dayssup')
 
-var2remove_manually_additional = 'post_lab_radio_date_fst_diff' #c('post_lab_radio_date_fst_diff','post_mgmt_date_fst_diff','post_other_outpat_date_fst_diff')
+var2remove_manually_additional = #'post_lab_radio_date_fst_diff'   
+  c('post_lab_radio_date_fst_diff','post_mgmt_date_fst_diff','post_other_outpat_date_fst_diff')
 
 
 
@@ -217,14 +228,21 @@ write_csv(config_, 'D:/Results/modelling_04_post_index_remove_top_var/Data/confi
 ```
 ## additional correction for the labelling; if we don't make these changes, mlr will complain!
 ```{r}
+
 mschool = factor2numeric(combined$medical_school_desc)
 combined$medical_school_desc = mschool$value
+mschool_table = tibble(key = mschool$map$keys() , value = mschool$map[[ mschool$map$keys() ]])
+write_csv(mschool_table, "D:/Results/attributes/medical_school_desc.csv")
 
 specialty = factor2numeric(combined$specialty)
 combined$specialty = specialty$value
+specialty_table = tibble(key = specialty$map$keys() , value = specialty$map[[ specialty$map$keys() ]])
+write_csv(specialty_table, "D:/Results/attributes/specialty.csv")
 
 specialty_cat = factor2numeric(combined$specialty_cat)
 combined$specialty_cat = specialty_cat$value
+specialty_cat_table = tibble(key = specialty_cat$map$keys() , value = specialty_cat$map[[ specialty_cat$map$keys() ]])
+write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
 
 ```
 
@@ -264,7 +282,8 @@ for (i in 1:4) {
   combined_num = extreme_values(
     combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
     var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
-    pth = 0.99)
+    pth = 0.99,
+    output_dir = results_dir_)
 
   combined_num = combined_num$data %>%   select( - one_of('pat_id'))
 
@@ -275,7 +294,8 @@ for (i in 1:4) {
 
   combined_cat = dummy_vars(combined_ %>% 
     select( one_of(config_$Column[c(key,selected_cat)])),
-    var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'))
+    var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'),
+    output_dir = results_dir_)
     
   combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
   
@@ -312,5 +332,52 @@ for (i in 1:4) {
   write_xgb_model(xgb_model, results_dir = results_dir_, dataset = dataset)
 
 }
+
+```
+## Load the spreadsheet
+```{r}
+fnames = vector('list',4)
+for (i in 1:4) {
+  fnames[[i]]  = paste0(
+    'D:/Results/modelling_04_post_index_remove_top_var/xgb_complied_',
+    cname[i],'/PRCurve_XGB_3fold_freq_100_bins.csv')
+}
+
+prec = vector('list',4)
+for (i in 1:4) {
+  prec[[i]] = read_csv(fnames[[i]])
+}
+
+table_ = tibble( prec[[1]]$rec_binned[1:100], prec[[1]]$prec[1:100], 
+  prec[[2]]$prec[1:100], prec[[3]]$prec[1:100], prec[[4]]$prec[1:100])
+colnames(table_) = c('Recall bin', cname)
+
+write_csv(table_, paste0(results_dir,'PR_curves.csv'))
+```
+
+## print var importance
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+
+vi_fnames = vector('list',4)
+for (i in 1:4) {
+  vi_fnames[[i]]  = paste0(results_dir,
+    'xgb_complied_',cname[i],
+    '/VI_XGB_freq_singlemodel.csv')
+}
+
+# add the description back
+vi = vector('list',4)
+for (i in 1:4) {
+  vi[[i]] = read_csv(vi_fnames[[i]])
+  vi[[i]]$Description = Description [[vi[[i]]$Feature]]
+  fname = paste0(results_dir,
+    'xgb_complied_',cname[i],
+    '/VI_XGB_freq_singlemodel_Decription.csv')
+  write_csv(vi[[i]], fname)
+}
+
+
 
 ```

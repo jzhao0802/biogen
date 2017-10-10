@@ -1,0 +1,5 @@
+#!/bin/bash
+
+echo 'auc,eer' > error_metric.csv
+cat */*metric.csv | grep -v auc >> error_metric.csv
+
