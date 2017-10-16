@@ -19,7 +19,8 @@ subst L: F:\Norman\Biogen_Tecf2017_round5
 
 
 
-pre_comdx_lst2_diff
-
-xgb_universe_basic/  xgb_universe_basic_diff/  xgb_universe_basic_hcp/  xgb_universe_basic_hcp_diff/
+subst R: \\kgxsapp100\F\Projects\Biogen_Tecfidera
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+subst L: C:\Users\npoh\Documents\Git\projects\Biogen_Tecf2017_round5
+subst Z: "\\plyvnas02\HEOR\CLIENT\2017_Biogen Tecfidera_1158015\Results_PA_team"
 

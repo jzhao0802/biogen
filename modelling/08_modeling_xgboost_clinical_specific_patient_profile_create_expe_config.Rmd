@@ -1,0 +1,179 @@
+---
+title: "Develop the configuration for experiments"
+author: "Norman Poh"
+date: "12 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Correct the config file since we based our var-removal criteria based on these
+
+```{r}
+```
+##  Eliminating variables
+
+The universe of features consists of  "all counts + HCP + last date of date difference in the pre-index period except co-morbidities, and except post-index variables (which include tec_up, copay, etc)"
+
+If we retain the "last date of date difference in the pre-index period", that means we eliminate the "first date difference variables in the pre-index period"
+
+### Summary
+
+I have worked out a list of variables to be eliminated on the basis of:
+1.	100% missing
+2.	Having only 1 unique value when it is a numerical variable 
+3.	Having no value for the positive class
+4.	Perfect separation on the basis of zero equal error rate; which indicates them being self-predictors. Three variables are: follow_up_end_dt_diff, disc_dt_diff, tot_dayssup_180)
+5.	Very low equal error rate but nonzero, again, due to being a self-predictor, e.g., the total number of tecfidera fills (sum_fill)
+6.	Having no more than 5 observed measurements for the positive class
+7.	Having no more than 10 observed measurements for the positive class
+
+In total, 123 variables are eliminated and so we have 321 usable variables in the end (plus 1 for pat_id)
+
+### Further elimination based on the agreed universal feature
+
+The implementation of this is based on:
+
+1. All post-index var are to be removed
+2. var with fst (First) in the pre-index period are to be removed (var with last date-diff at pre-index is hence retained)
+3. Var with co-morbidities date difference are to be removed
+
+This is in addition to:
+* Variables of 'others' data type
+
+So, we are left with 164 variables in the end -- see below
+
+```{r}
+#------------------------------------------------------------------------------------------------
+# eliminate var that is empty
+var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
+
+# Elimination based on EER and number of positivie criteria
+eer_table = read_csv('D:/Data/QC/num_eer_analysis.csv')
+table.eliminate = eer_table %>% filter( (eer <0.04 |  `# pos`<=10 ) )
+
+#------------------------------------------------------------------------------------------------
+# manually removed var - agre_group due to duplicate;
+# remove copay_tecfidera because it is calculated on the toality of 180 days post-index
+var2remove_manually = c('age_group', 'copay_tecfidera')
+
+# we now get 125 instead of 123
+var2remove_ = unique(  c(table.eliminate$Column, var2remove,var2remove_manually))
+length(var2remove_)
+
+
+#------------------------------------------------------------------------------------------------
+# var of others Type are to be removed
+configFiltered = config %>% filter( Type != 'others') %>% 
+  filter (! (Column %in% var2remove_))
+dim(configFiltered) # we now have 318 variables
+
+
+#------------------------------------------------------------------------------------------------
+#resource utilisation
+
+#------------------------------------------------------------------------------------------------
+#resource utilisation
+var_post_resource = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Resource Utilization']
+#It has diff and count; and we remove the count of resources because it is calculated on post-index 180 days as opposed to from index date to discontinuation date, so they are potentially not generalisable
+
+var_post_resource_diff = var_post_resource [ str_detect(var_post_resource, '_diff') ] 
+var_post_resource_count = setdiff(var_post_resource, var_post_resource_diff)
+
+var_post_resource_diff  # we want to keep them - to be used in model 3; this includes post_script_lst_diff, which was discussed
+
+var_post_resource_diff_fst = var_post_resource_diff[ str_detect(var_post_resource_diff,'fst')]
+var_post_resource_diff_lst = setdiff(var_post_resource_diff, var_post_resource_diff_fst)
+
+var_post_resource_count # we will remove this; this includes post_script_lst_dayssup which we discussed
+
+#remove var_post_resource_count and last occurence post-index resource vars here definitely
+configFiltered = configFiltered %>% filter (! (Column %in% 
+  c(var_post_resource_count,var_post_resource_diff_lst) ) )
+dim(configFiltered) # we now have 305 variables
+
+#------------------------------------------------------------------------------------------------
+# Treatment pattern
+#we remove them but may put them back later
+var_post_treatment = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Treatment Patterns']
+
+#there is only tec_up here!
+
+#------------------------------------------------------------------------------------------------
+# financial burden
+var_post_finburden = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Financial Burden']
+
+var_post_finburden
+
+#we had -- "copay_tecfidera" "copay_avg_norm" but now copay_avg_norm only
+
+#------------------------------------------------------------------------------------------------
+# pre-index but need to exclude last date
+var_pre = configFiltered$Column[ configFiltered$var_period == 'pre']
+var_pre_last = var_pre [ str_detect(var_pre, 'lst') ] # to delete them
+var_pre_first = setdiff(var_pre, var_pre_last)
+
+#Remove the var_pre_first
+configFiltered = configFiltered %>% filter ( !(Column %in% var_pre_first ) ) 
+dim(configFiltered) # we now have 305 variables
+
+#------------------------------------------------------------------------------------------------
+# post-index of everything except financial burden and treatment and resources
+var_post = configFiltered$Column[ configFiltered$var_period == 'post' ]
+
+var_post = setdiff( var_post,
+                    c(var_post_finburden, var_post_treatment, 
+                      var_post_resource_diff_fst))
+var_post
+#------------------------------------------------------------------------------------------------
+# Check the variable left over
+var_post_fst = configFiltered$Column[ str_detect(configFiltered$Column, 'post') & 
+  str_detect(configFiltered$Column, 'fst')]
+var_post_lst = configFiltered$Column[ str_detect(configFiltered$Column, 'post') & 
+  str_detect(configFiltered$Column, 'lst')]
+
+configFiltered =configFiltered %>% filter( !(Column %in% var_post_fst))
+
+var_so_far = unique(c(var_pre_last, var_post_finburden, var_post_treatment,
+  var_post_resource_diff_fst, var_post_lst ))
+
+var_left_over = setdiff(configFiltered$Column,var_so_far)
+var_left_over
+
+View(configFiltered %>% filter( Column %in% var_left_over))
+  #configFiltered$Column[ configFiltered$var_period == 'post' ]
+
+check_ = configFiltered %>% filter( Column %in% var_left_over)
+check_ = as.data.frame(table(check_$var_grouping))
+# We will use post-index var
+# var_post = config$Column[config$var_period=='post']
+
+var_to_remove = setdiff(config$Column, 
+  union_all(var_left_over, var_pre_last, var_post_lst, var_post_resource_diff_fst,
+            var_post_treatment, var_post_finburden))
+```
+
+
+## var to remove
+```{r}
+#------------------------------------------------------------------------------------------------
+# Check the variable left over
+
+config$v1 = config$Column %in% union(var_left_over, var_pre_last) # var used for model 1
+config$v2 = config$Column %in% var_post_fst # var used for model 2 and so on
+config$v3 = config$Column %in% var_post_resource_diff_fst
+config$v4 = config$Column %in% c(var_post_treatment, var_post_finburden)
+
+config__ = config %>% select( one_of(paste0('v',0:4)) )
+stat_ = as.data.frame(sapply(config__,sum))
+colnames(stat_) <- 'sum'
+stat_
+sum(stat_)
+dim(config)
+write_csv(config, paste0(results_dir, 'annotated_var_config.csv'))
+```

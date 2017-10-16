@@ -183,7 +183,13 @@ write_csv(eer_table, 'D:/Data/QC/num_eer_analysis_complied.csv')
 
 ```
 
+## QC the effective_year_diff
 
+```{r}
+selected = which(combined$effective_year_diff>0)
+combined$
+
+```
 
 
 ## STOP HERE

@@ -1,0 +1,548 @@
+---
+title: "Modelling with the agreed universe of features"
+author: "Norman Poh"
+date: "6 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+#rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+
+```
+
+```{r}
+
+results_dir = "D:/Results/modelling_05_clinical_specific/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+config = readRDS("D:/Data/Processed/combined_date_complied_config.rds")
+combined = readRDS("D:/Data/Processed/combined_date_complied_data.rds")
+
+```
+
+## add new data -- does nothing for the moment.
+```{r}
+raw = read_csv("D:/Data/Flat_File_v6/mapped_id.csv",
+               col_types = (cols(pat_id = col_character(), .default = col_guess())))
+idmap = hashmap(raw$pat_id, raw$mapped_id)
+
+raw = read_csv("D:/Data/Flat_File_v7/BGN_1158015_pat_data.csv",
+               col_types = (cols(pat_id = col_character(), .default = col_guess())))
+```
+## Correct variables
+
+```{r}
+
+
+```
+
+## Correct the config file since we based our var-removal criteria based on these
+
+```{r}
+```
+##  Eliminating variables
+
+The universe of features consists of  "all counts + HCP + last date of date difference in the pre-index period except co-morbidities, and except post-index variables (which include tec_up, copay, etc)"
+
+If we retain the "last date of date difference in the pre-index period", that means we eliminate the "first date difference variables in the pre-index period"
+
+### Summary
+
+I have worked out a list of variables to be eliminated on the basis of:
+1.	100% missing
+2.	Having only 1 unique value when it is a numerical variable 
+3.	Having no value for the positive class
+4.	Perfect separation on the basis of zero equal error rate; which indicates them being self-predictors. Three variables are: follow_up_end_dt_diff, disc_dt_diff, tot_dayssup_180)
+5.	Very low equal error rate but nonzero, again, due to being a self-predictor, e.g., the total number of tecfidera fills (sum_fill)
+6.	Having no more than 5 observed measurements for the positive class
+7.	Having no more than 10 observed measurements for the positive class
+
+In total, 123 variables are eliminated and so we have 321 usable variables in the end (plus 1 for pat_id)
+
+### Further elimination based on the agreed universal feature
+
+The implementation of this is based on:
+
+1. All post-index var are to be removed
+2. var with fst (First) in the pre-index period are to be removed (var with last date-diff at pre-index is hence retained)
+3. Var with co-morbidities date difference are to be removed
+
+This is in addition to:
+* Variables of 'others' data type
+
+So, we are left with 164 variables in the end -- see below
+
+```{r}
+#------------------------------------------------------------------------------------------------
+# eliminate var that is empty
+var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
+
+# Elimination based on EER and number of positivie criteria
+eer_table = read_csv('D:/Data/QC/num_eer_analysis.csv')
+table.eliminate = eer_table %>% filter( (eer <0.04 |  `# pos`<=10 ) )
+
+#------------------------------------------------------------------------------------------------
+# manually removed var - agre_group due to duplicate;
+# remove copay_tecfidera because it is calculated on the toality of 180 days post-index
+var2remove_manually = c('age_group', 'copay_tecfidera')
+
+# we now get 125 instead of 123
+var2remove_ = unique(  c(table.eliminate$Column, var2remove,var2remove_manually))
+length(var2remove_)
+
+
+#------------------------------------------------------------------------------------------------
+# var of others Type are to be removed
+configFiltered = config %>% filter( Type != 'others') %>% 
+  filter (! (Column %in% var2remove_))
+dim(configFiltered) # we now have 318 variables
+
+
+#------------------------------------------------------------------------------------------------
+#resource utilisation
+
+#------------------------------------------------------------------------------------------------
+#resource utilisation
+var_post_resource = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Resource Utilization']
+#It has diff and count; and we remove the count of resources because it is calculated on post-index 180 days as opposed to from index date to discontinuation date, so they are potentially not generalisable
+
+var_post_resource_diff = var_post_resource [ str_detect(var_post_resource, '_diff') ] 
+var_post_resource_count = setdiff(var_post_resource, var_post_resource_diff)
+
+var_post_resource_diff  # we want to keep them - to be used in model 3; this includes post_script_lst_diff, which was discussed
+
+var_post_resource_diff_fst = var_post_resource_diff[ str_detect(var_post_resource_diff,'fst')]
+var_post_resource_diff_lst = setdiff(var_post_resource_diff, var_post_resource_diff_fst)
+
+var_post_resource_count # we will remove this; this includes post_script_lst_dayssup which we discussed
+
+#remove var_post_resource_count and last occurence post-index resource vars here definitely
+configFiltered = configFiltered %>% filter (! (Column %in% 
+  c(var_post_resource_count,var_post_resource_diff_lst) ) )
+dim(configFiltered) # we now have 305 variables
+
+#------------------------------------------------------------------------------------------------
+# Treatment pattern
+#we remove them but may put them back later
+var_post_treatment = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Treatment Patterns']
+
+#there is only tec_up here!
+
+#------------------------------------------------------------------------------------------------
+# financial burden
+var_post_finburden = configFiltered$Column[ configFiltered$var_period == 'post' 
+  & configFiltered$var_grouping == 'Financial Burden']
+
+var_post_finburden
+
+#we had -- "copay_tecfidera" "copay_avg_norm" but now copay_avg_norm only
+
+#------------------------------------------------------------------------------------------------
+# pre-index but need to exclude last date
+var_pre = configFiltered$Column[ configFiltered$var_period == 'pre']
+var_pre_last = var_pre [ str_detect(var_pre, 'lst') ] # to delete them
+var_pre_first = setdiff(var_pre, var_pre_last)
+
+#Remove the var_pre_first
+configFiltered = configFiltered %>% filter ( !(Column %in% var_pre_first ) ) 
+dim(configFiltered) # we now have 305 variables
+
+#------------------------------------------------------------------------------------------------
+# post-index of everything except financial burden and treatment and resources
+var_post = configFiltered$Column[ configFiltered$var_period == 'post' ]
+
+var_post = setdiff( var_post,
+                    c(var_post_finburden, var_post_treatment, 
+                      var_post_resource_diff_fst))
+var_post
+#------------------------------------------------------------------------------------------------
+# Check the variable left over
+var_post_fst = configFiltered$Column[ str_detect(configFiltered$Column, 'post') & 
+  str_detect(configFiltered$Column, 'fst')]
+var_post_lst = configFiltered$Column[ str_detect(configFiltered$Column, 'post') & 
+  str_detect(configFiltered$Column, 'lst')]
+
+configFiltered =configFiltered %>% filter( !(Column %in% var_post_fst))
+
+var_so_far = unique(c(var_pre_last, var_post_finburden, var_post_treatment,
+  var_post_resource_diff_fst, var_post_lst ))
+
+var_left_over = setdiff(configFiltered$Column,var_so_far)
+var_left_over
+
+View(configFiltered %>% filter( Column %in% var_left_over))
+  #configFiltered$Column[ configFiltered$var_period == 'post' ]
+
+check_ = configFiltered %>% filter( Column %in% var_left_over)
+check_ = as.data.frame(table(check_$var_grouping))
+# We will use post-index var
+# var_post = config$Column[config$var_period=='post']
+
+var_to_remove = setdiff(config$Column, 
+  union_all(var_left_over, var_pre_last, var_post_lst, var_post_resource_diff_fst,
+            var_post_treatment, var_post_finburden))
+```
+## var to remove
+```{r}
+#------------------------------------------------------------------------------------------------
+# Check the variable left over
+
+config$v1 = config$Column %in% union(var_left_over, var_pre_last) # var used for model 1
+config$v2 = config$Column %in% var_post_fst # var used for model 2 and so on
+config$v3 = config$Column %in% var_post_resource_diff_fst
+config$v4 = config$Column %in% c(var_post_treatment, var_post_finburden)
+
+config__ = config %>% select( one_of(paste0('v',0:4)) )
+stat_ = as.data.frame(sapply(config__,sum))
+colnames(stat_) <- 'sum'
+stat_
+sum(stat_)
+dim(config)
+write_csv(config, paste0(results_dir, 'annotated_var_config.csv'))
+```
+
+## remove the variables!
+
+
+```{r}
+config = read_csv('D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+
+config$v0  = !(config$v1 | config$v2 | config$v3 | config$v4)
+
+# checking
+config__ = config %>% select( one_of(paste0('v',0:4)) )
+stat_ = as.data.frame(sapply(config__,sum))
+colnames(stat_) <- 'sum'
+stat_
+sum(stat_)
+
+#write_csv(config, 'D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+
+var2eliminate = config$Column[  config$v0 ]
+config_ = config %>% filter( !(Column %in% var2eliminate ) )
+combined_ = combined %>% select( -one_of(var2eliminate))
+
+length(config_$Column) 
+
+
+
+dim(combined_)
+dim(config_) 
+
+```
+
+## Divide data HCP, count, diff
+
+```{r}
+var2use = vector('list',4)
+var2use[[1]] = config_$Column [ config_$v1]
+var2use[[2]] = config_$Column [ config_$v1 | config_$v2]
+var2use[[3]] = config_$Column [ config_$v1 | config_$v2 | config_$v3]
+var2use[[4]] = config_$Column [ config_$v1 | config_$v2 | config_$v3 | config_$v4 ]
+var2use[[5]] = config_$Column [ config_$v3 ] # resource only
+
+cname = paste0('v',1:5)
+
+for (i in 1:5) {
+  print( length(var2use[[i]]) )
+}
+```
+## additional correction for the labelling; if we don't make these changes, mlr will complain!
+```{r}
+
+mschool = factor2numeric(combined$medical_school_desc)
+combined$medical_school_desc = mschool$value
+mschool_table = tibble(key = mschool$map$keys() , value = mschool$map[[ mschool$map$keys() ]])
+write_csv(mschool_table, "D:/Results/attributes/medical_school_desc.csv")
+
+specialty = factor2numeric(combined$specialty)
+combined$specialty = specialty$value
+specialty_table = tibble(key = specialty$map$keys() , value = specialty$map[[ specialty$map$keys() ]])
+write_csv(specialty_table, "D:/Results/attributes/specialty.csv")
+
+specialty_cat = factor2numeric(combined$specialty_cat)
+combined$specialty_cat = specialty_cat$value
+specialty_cat_table = tibble(key = specialty_cat$map$keys() , value = specialty_cat$map[[ specialty_cat$map$keys() ]])
+write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
+
+```
+
+## Experiments
+
+```{r}
+
+for (i in 1:5) {
+  
+  results_dir_  = paste0(results_dir,'xgb_', cname[i],'/')
+  mkdirs(results_dir_)
+  
+  config_ = config %>% filter( (Column %in% 
+    union_all('discontinue_flg','pat_id',var2use[[i]])  )) 
+  combined_ = combined %>% select( one_of(
+    union_all('discontinue_flg','pat_id',var2use[[i]])))
+  dim(config_)
+  dim(combined_)
+  
+  key = which(config_$Column=='pat_id')
+  
+  class_type = as.data.frame( sapply(combined_, class))
+  is_integer =class_type == "integer"
+  
+  selected_num = which(config_$Type=="numerical" & ! is_integer)
+  selected_int = which(config_$Type=="numerical" & is_integer)
+  selected_cat = which(config_$Type=="categorical")
+  
+  selected_all = c(selected_cat, selected_int, selected_num)
+
+  var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
+  var_stat
+  sum(var_stat)
+  
+  # extrem value
+  if (length(selected_num)>0) {
+    write_csv(config_[c(key,selected_num),], 
+      paste0(results_dir_, 'modelling_var_config_num.csv'))
+    combined_num = extreme_values(
+        combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
+        var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
+        pth = 0.99,
+        output_dir = results_dir_)
+    combined_num = combined_num$data %>%   select( - one_of('pat_id'))
+  } else {
+    combined_num=combined_ %>% select( one_of('dodo'))
+  }
+  
+  
+  #cat variable
+  if (length(selected_cat)>0) {
+    write_csv(config_[c(key,selected_cat),],
+      paste0(results_dir_, "modelling_var_config_cat.csv"))
+  
+    combined_cat = dummy_vars(combined_ %>% 
+      select( one_of(config_$Column[c(key,selected_cat)])),
+      var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'),
+      output_dir = results_dir_)
+      
+    combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
+  } else {
+    combined_cat=combined_ %>% select( one_of('dodo'))
+  }
+  
+  #integer variable
+  combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
+  
+  #now we have: combined_num, combined_cat, combined_int, so we can run xgboost
+  data = cbind(combined_cat, combined_num, combined_int)
+  data$label = data$discontinue_flg_1_0
+  data$discontinue_flg_1_0 = NULL
+  
+  data$label = as.factor(data$label)
+  table(data$label)
+  
+  colnames_ = make_var_name(colnames(data))
+  colnames(data) = colnames_
+  
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+  
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
+  
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
+  
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  analyse_res_cv(res, results_dir = results_dir_)
+  
+  # train a single model
+  xgb_model <- train(learner = lrn_xgb, task = dataset)
+  
+  write_xgb_model(xgb_model, results_dir = results_dir_, dataset = dataset)
+
+}
+
+```
+## Load the spreadsheet
+```{r}
+
+fnames = vector('list',5)
+for (i in 1:5) {
+  fnames[[i]]  = paste0(results_dir,'xgb_',
+    cname[i],'/PRCurve_XGB_3fold_freq_100_bins.csv')
+}
+
+prec = vector('list',5)
+for (i in 1:5) {
+  prec[[i]] = read_csv(fnames[[i]])
+}
+
+table_ = tibble( prec[[1]]$rec_binned[1:100], prec[[1]]$prec[1:100], 
+  prec[[2]]$prec[1:100], prec[[3]]$prec[1:100], prec[[4]]$prec[1:100], prec[[5]]$prec[1:100])
+colnames(table_) = c('Recall bin', cname)
+
+write_csv(table_, paste0(results_dir,'PR_curves.csv'))
+```
+
+## print var importance
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+
+vi_fnames = vector('list',5)
+for (i in 1:5) {
+  vi_fnames[[i]]  = paste0(results_dir,
+    'xgb_',cname[i],
+    '/VI_XGB_freq_singlemodel.csv')
+}
+
+# add the description back
+vi = vector('list',5)
+for (i in 1:5) {
+  vi[[i]] = read_csv(vi_fnames[[i]])
+  vi[[i]]$Description = Description [[vi[[i]]$Feature]]
+  fname = paste0(results_dir,
+    'xgb_',cname[i],
+    '/VI_XGB_freq_singlemodel_Decription.csv')
+  write_csv(vi[[i]], fname)
+}
+
+
+
+```
+## get the stat
+
+```{r}
+bivar = read_csv('D:/Data/QC/bivar_stats_num/bivar_stats_y_flag.csv')
+vi_ = read_csv('D:/Results/modelling_05_clinical_specific/xgb_v2/VI_XGB_freq_singlemodel_Decription.csv')
+corr_map = hashmap(bivar$Variable, bivar$Correlation)
+eer_map = hashmap(eer_table$Column, eer_table$eer)
+
+var_grouping = hashmap(config$Column, config$var_grouping)
+
+# top ten
+n_=40
+table_ = tibble(Column =vi_$Feature[1:n_], 
+  Corr= corr_map[[ vi_$Feature[1:n_] ]],
+  eer = eer_map[[ vi_$Feature[1:n_] ]],
+  Description = Description[[ vi_$Feature[1:n_] ]],
+  var_grouping = var_grouping[[ vi_$Feature[1:n_] ]]
+  )
+
+
+write_csv(table_, 'D:/Results/modelling_05_clinical_specific/model2_top40_stat.csv')
+
+table(var_grouping[[ vi_$Feature[1:30] ]])
+```
+
+## do propoer training and testing --> go to 08_*.Rmd
+
+```{r}
+
+
+```
+
+## STOP HERE
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Model two patient profile
+
+```{r}
+res = readRDS('D:/Results/modelling_05_clinical_specific/xgb_v2/res_XGB_3fold.rds')
+res = res$pred$data
+pred_order <- BBmisc::sortByCol(res, col = "prob.1", asc = FALSE)
+
+top_10 <- pred_order[1:10,]
+top_10$pat_id = top_10$id
+top_10$id <- NULL
+
+#res$PATIENT_ID <- PATIENT_ID
+
+top_10_patients <- left_join(top_10, combined, by = "pat_id")
+
+# they are not aligned!!
+top_10_patients$truth == top_10_patients$discontinue_flg
+
+
+res = res %>% dplyr::rename(pat_id =id)
+
+combined_ = plyr::join(combined, res)
+
+
+order = sort(combined_$prob.1, index.return=TRUE, decreasing=TRUE)
+
+
+selected =order$ix[1:10]
+combined_$prob.1[selected]
+
+table_ = as.data.frame(t(combined_[selected,]))
+View(table_)
+
+combined__ = combined_[selected,]
+write_csv(combined__,
+  'D:/Results/modelling_05_clinical_specific/top_10_pat_model2_combined.csv')
+
+combined_$discontinue_flg == combined_$truth
+
+View(combined_[order$ix[1:100],c('pat_id','prob.1','truth')])
+max(res$pred$data$prob.1)
+
+
+```
