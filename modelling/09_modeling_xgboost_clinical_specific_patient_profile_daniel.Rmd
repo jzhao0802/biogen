@@ -1,7 +1,7 @@
 ---
 title: "Modelling with the agreed universe of features"
 author: "Norman Poh"
-date: "6 October 2017"
+date: "17 October 2017"
 output: html_document
 ---
 
@@ -52,29 +52,18 @@ source("L:/Lib/write_xgb_model.R")
 
 ```{r}
 
-results_dir = "D:/Results/modelling_05_clinical_specific/"
+results_dir = "D:/Results/modelling_06_clinical_specific/"
 mkdirs(results_dir)
 ```
 
 ## Load the original variables
 
 ```{r}
-#config = readRDS("D:/Data/Processed/combined_date_complied_config.rds")
-config = read_csv('D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
-
-combined = readRDS("D:/Data/Processed/combined_date_complied_data.rds")
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
 
 ```
 
-## add new data -- does nothing for the moment.
-```{r}
-#raw = read_csv("D:/Data/Flat_File_v6/mapped_id.csv",
-#               col_types = (cols(pat_id = col_character(), .default = col_guess())))
-#idmap = hashmap(raw$pat_id, raw$mapped_id)
-#
-#raw = read_csv("D:/Data/Flat_File_v7/BGN_1158015_pat_data.csv",
-#               col_types = (cols(pat_id = col_character(), .default = col_guess())))
-```
 ## Get the map up
 
 ```{r}
@@ -95,7 +84,7 @@ colnames(stat_) <- 'sum'
 stat_
 sum(stat_)
 
-#write_csv(config, 'D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+#write_csv(config, 'D:/Results/modelling_06_clinical_specific/annotated_var_config_verified.csv')
 
 var2eliminate = config$Column[  config$v0 ]
 config_ = config %>% filter( !(Column %in% var2eliminate ) )
@@ -110,7 +99,7 @@ dim(config_)
 
 ```
 
-## Divide data HCP, count, diff
+## Divide the data
 
 ```{r}
 var2use = vector('list',4)
@@ -150,7 +139,7 @@ write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
 
 ```{r}
 
-for (i in 2) {
+for (i in 1:3) {
   
   results_dir_  = paste0(results_dir,'xgb_profile_', cname[i],'/')
   mkdirs(results_dir_)
@@ -221,13 +210,15 @@ for (i in 2) {
   colnames_ = make_var_name(colnames(data))
   colnames(data) = colnames_
   
-  #divide into training and testing
+  #----------------------------------------------------------------------------------------
+  #divide into training and testing -- code not used for now
   k = dismo::kfold(data, 5, by=data$label)
   k_train = which(k<=4)
   k_test = which(k==5)
+
+  #----------------------------------------------------------------------------------------
+  # Train on the entire data set and test on it
   
-  #dataset = makeClassifTask(id='full', data=data[k_train,], target='label', positive=1)
-  #dataset_test = makeClassifTask(id='full', data=data[k_test,], target='label', positive=1)
   dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
   
   lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
@@ -245,16 +236,14 @@ for (i in 2) {
   
   dim(pred$data)
   length(k_test)
-  #lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
-  
-  
+
+    
   #get the order by prob.1
   order = sort(pred$data$prob.1, index.return=TRUE, decreasing=TRUE)
   
   #checking
   top_n = 20
   pred$data$prob.1[ order$ix[1:top_n] ]
-  
   
   #re-order it
   pred_reordered = pred$data[order$ix,]
@@ -276,24 +265,21 @@ for (i in 2) {
   write_csv(table_,
     paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited.csv'))
 
-  #
-  flag_is_na = table_$V1 == '0' |  is.na(table_$V1) 
-  mytable = as.data.frame(table(table_$var_grouping, flag_is_na))
-  write_csv(mytable,
-     paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited_p1.csv'))       
-  #write_csv(top_20_patients,
-  #  paste0(results_dir_,'top_20_pat_model2_combined.csv'))
+  #----------------------------------------------------------------------------------------
+  # this part of the code does cross validation
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
   
-  #write.table(table_,
-  #  paste0(results_dir_,'top_20_pat_model2_combined_transposed.csv'),
-  #  row.names = TRUE,  sep = ",")
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
   
-  #load the file
-  #table_ = read_csv(paste0(results_dir_,'top_20_pat_model2_combined_transposed.csv'))
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
   
-   #write.table(table_,
-   #  paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited.csv'),
-   #  row.names = TRUE,  sep = ",")
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  analyse_res_cv(res, results_dir = results_dir_)
+
 }
 
 ```
