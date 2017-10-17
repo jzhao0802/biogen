@@ -21,32 +21,34 @@ library(stringr)
 library(lubridate)
 library(tictoc)
 library(hashmap)
+library(xgboost)
+library(R.utils)
 library(ROCR)
-source("../lib/cut_linux.R")
-source("../lib/mystat.R")
-source('../lib/plot_cond_density.R')
-source('../lib/create_date_diffs.R')
-source('../lib/remove_na.R')
-source('../lib/mystat.R')
+library(pROC) # to calculate auc
 
-```
-
-## we define a series of helper functions here to do QC of date difference
-
-```{r}
-
-
-period_ = cut_linux(colnames(date_), field = 1, delimiter = "_");
-
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
 
 ```
 
 ## load the data
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_data.rds")
-config = readRDS("D:/Data/Processed/combined_date_config_validated.rds")
-results_dir = "D:/Data/Processed_post_index/"
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_config.csv")
+results_dir = "D:/Data/Processed/"
 mkdirs(results_dir)
 
 ```

@@ -52,7 +52,7 @@ source("L:/Lib/write_xgb_model.R")
 
 ```{r}
 
-results_dir = "D:/Results/modelling_05_clinical_specific/"
+results_dir = "D:/Results/modelling_06_clinical_specific/"
 mkdirs(results_dir)
 ```
 
@@ -60,7 +60,7 @@ mkdirs(results_dir)
 
 ```{r}
 #config = readRDS("D:/Data/Processed/combined_date_complied_config.rds")
-config = read_csv('D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+config = read_csv('D:/Results/modelling_06_clinical_specific/annotated_var_config_verified.csv')
 
 combined = readRDS("D:/Data/Processed/combined_date_complied_data.rds")
 
@@ -95,7 +95,7 @@ colnames(stat_) <- 'sum'
 stat_
 sum(stat_)
 
-#write_csv(config, 'D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+#write_csv(config, 'D:/Results/modelling_06_clinical_specific/annotated_var_config_verified.csv')
 
 var2eliminate = config$Column[  config$v0 ]
 config_ = config %>% filter( !(Column %in% var2eliminate ) )

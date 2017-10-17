@@ -1,0 +1,159 @@
+---
+title: "Load data"
+author: "Norman Poh"
+date: "2 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Init
+```{r}
+setwd("L:/loading")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/config_with_colnames_with_v.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+sourceDirectory("../lib")
+
+# Using Windows prompt, map the data folder to D drive, e.g., 
+# net use D: \\localhost\C$\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```
+
+## Load the processed data
+
+```{r}
+config = read_csv('D:/Results/modelling_05_clinical_specific/annotated_var_config_verified.csv')
+combined = readRDS("D:/Data/Processed/archive/combined_date_complied_data.rds")
+
+# get the mapping ready
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+Description = hashmap(config$Column, config$Description)
+
+## restore the original id
+id_ = read_csv('D:/Data/Flat_File_v6/mapped_id.csv')
+idmap = hashmap(id_$mapped_id, id_$pat_id)
+combined$pat_id = idmap[[combined$pat_id]]
+```
+
+## Load the new patient data
+
+```{r}
+raw = read_csv("D:/Data/Flat_File_v7/BGN_1158015_pat_data.csv",
+    col_types = (cols(PAT_ID = col_character(), .default = col_guess())))
+colnames(raw) = str_to_lower(colnames(raw))
+
+# data_ <- read_transform(
+#   input_csv = "D:/Data/Flat_File_v7/BGN_1158015_pat_data_lower.csv",
+#   var_config_csv = "D:/Results/var_config/biogen_new_patient_var_config.csv",
+#   read_key_as_double = FALSE
+# )
+
+```
+## try combining them
+
+```{r}
+#the variables that have changed are the following ones, according to Magdaliz's email on Tue 10/10/2017 16:35
+
+var_new = c('Pre_concom_gpif_num1','Pre_concom_gpif_num2','Pre_concom_gpif_num10','Pre_concom_gpif_num14','Pre_medication_num27','Pre_medication_num28','Pre_concom_gpis_num2','Pre_concom_gpif_fst1','Pre_concom_gpif_fst2','Pre_concom_gpif_fst10','Pre_concom_gpif_fst14','Pre_medication_fst27','Pre_medication_fst28','Pre_concom_gpis_fst2','Pre_concom_gpif_lst1','Pre_concom_gpif_lst2','Pre_concom_gpif_lst10','Pre_concom_gpif_lst14','Pre_medication_lst27','Pre_medication_lst28','Pre_concom_gpis_lst2')
+
+var_new = str_to_lower(var_new)
+
+combined_new = left_join(combined %>% select(-one_of(var_new)),
+  raw %>% select(one_of(c('pat_id', var_new))), by='pat_id')
+
+config = config_with_colnames_with_v(config, colnames(combined_new))
+
+sum(config$Column == colnames(combined_new))
+
+
+```
+
+## create the date difference
+
+```{r}
+
+var_new = var_new [str_detect(var_new, 'fst|lst')]
+
+# work with the date variables only
+colnames_ = colnames(combined_data)
+
+date_ = combined_new %>% select(  one_of(c(var_new, 'idx_dt')))
+
+date__ <- as.data.frame(  sapply(date_, mdy))
+date_ = create_date_diffs(date__, index_col = "idx_dt")
+colnames_original = colnames(date_)
+colnames(date_) = paste0(colnames_original, '_diff')
+
+colnames_datediff_var = colnames(date_)
+
+combined_new[,colnames_datediff_var] = date_
+
+sum(config$Column == colnames(combined_new))
+#config = config_with_colnames_with_v(config, colnames(combined_new))
+```
+
+## saving
+```{r}
+
+saveRDS(combined_new, "D:/Data/Processed/combined_date_complied_rectified_data.rds")
+saveRDS(config,       "D:/Data/Processed/archive/combined_date_complied_rectified_config.rds")
+
+write_csv(combined_new, "D:/Data/Processed/archive/combined_date_complied_rectified_data.csv")
+write_csv(config,       "D:/Data/Processed/combined_date_complied_rectified_config.csv")
+
+```
+## normalize these variables
+```{r}
+selected = config$var_period=='post' & str_detect(config$Column,'num')
+selected_var = config$Column[selected]
+selected_row = which(combined_new$discontinue_flg==1)
+combined_new$duration_post = 180/30
+month_diff = as.numeric(mdy(combined_new$disc_dt[selected_row]) 
+                        - mdy(combined_new$idx_dt[selected_row]) )
+combined_new$duration_post[selected_row] = month_diff/30
+
+#overwrite now!
+for (j in 1:length(selected_var)) {
+  combined_new[, selected_var[j]] = combined_new[, selected_var[j]] / combined_new$duration_post
+}
+combined_new$duration_post=NULL
+```
+## saving
+```{r}
+sum( colnames(combined_new) == config$Column)
+saveRDS(combined_new, "D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
+saveRDS(config,       "D:/Data/Processed/archive/combined_date_complied_rectified_num_config.rds")
+
+write_csv(combined_new, "D:/Data/Processed/archive/combined_date_complied_rectified_num_data.csv")
+write_csv(config,       "D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
+
+```
