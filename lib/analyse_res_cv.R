@@ -1,6 +1,6 @@
 analyse_res_cv <- function(res, results_dir = "./") {
   # make pr curve:
-  pr_curve <- perf_binned_perf_curve(pred = res$pred, bin_num = 100)
+  pr_curve <- perf_binned_perf_curve(pred = res$pred, bin_num = 20)
   
   write_csv(pr_curve$curve, 
     paste0(results_dir, "PRCurve_XGB_3fold_freq_100_bins.csv"))

@@ -52,15 +52,15 @@ source("L:/Lib/write_xgb_model.R")
 
 ```{r}
 
-results_dir = "D:/Results/modelling_06_clinical_specific/"
+results_dir = "D:/Results/modelling_07_clinical_specific/"
 mkdirs(results_dir)
 ```
 
 ## Load the original variables
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv")
 
 ```
 
@@ -114,6 +114,13 @@ cname = paste0('v',1:5)
 for (i in 1:5) {
   print( length(var2use[[i]]) )
 }
+
+stat_ = as.data.frame(sapply(config_ %>% select(paste0('v',0:4)), sum))
+colnames(stat_) = 'num_of_var'
+stat_
+
+config_$Column[config_$v2]
+config_$Column[config_$v3]
 ```
 ## additional correction for the labelling; if we don't make these changes, mlr will complain!
 ```{r}
@@ -329,4 +336,7 @@ table_ = tibble( prec[[1]]$rec_binned[1:100], prec[[1]]$prec[1:100],
 colnames(table_) = c('Recall bin', cname[1:3])
 
 write_csv(table_, paste0(results_dir,'PR_curves.csv'))
+```
+```{bash}
+
 ```

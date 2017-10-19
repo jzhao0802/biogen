@@ -44,9 +44,9 @@ source("L:/Lib/write_xgb_model.R")
 ```
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
-results_dir = "D:/Data/QC_v2/univar"
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv")
+results_dir = "D:/Data/QC_v8/univar"
 mkdirs(results_dir)
 
 ```
@@ -55,8 +55,8 @@ mkdirs(results_dir)
 
 ```{r}
 univar_results <- univariate_stats(input = combined,
-  var_config = "D:/Data/Processed/combined_date_complied_rectified_num_config.csv",
-  output_dir = "D:/Data/QC_v2/univar",
+  var_config = "D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv",
+  output_dir = "D:/Data/QC_v8/univar",
   vargt0 = FALSE)
 
 View(univar_results$cat)
@@ -88,15 +88,15 @@ pre_concom_ndc_lst4_diff	Variable has only 1 unique value
 pre_concom_ndc_fst4_diff and idx_dt are the same thing
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
+#combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_data.rds")
+#config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_config.csv")
 
 Description = hashmap(config$Column, config$Description)
-config_ = config_with_colnames(config, colnames(combined))
+config = config_with_colnames(config, colnames(combined))
 
-dim(config_)
+dim(config)
 dim(combined)
-sum(config_$Column == colnames(combined))
+sum(config$Column == colnames(combined))
 
 var2remove = c('pre_concom_gpif_fst8','pre_concom_gpif_lst8','pre_medication_fst11','pre_medication_lst11','pre_medication_fst13','pre_medication_lst13','pre_concom_gpif_fst8_diff','pre_concom_gpif_lst8_diff','pre_medication_fst11_diff','pre_medication_lst11_diff','pre_medication_fst13_diff','pre_medication_lst13_diff','pre_script_fst_diff','pre_script_lst_dayssup_diff','post_script_lst_dayssup_diff','pre_concom_gpif_num8','pre_medication_num11','pre_medication_num13','pre_concom_ndc_fst4_diff','pre_concom_ndc_lst4_diff')
 
@@ -119,15 +119,15 @@ sum(colnames(combined) == final_config$Column)
 
 ## when the outcome is discrete
 ```{r}
-mkdirs("D:/Data/QC_v2/bivar_stats_cat")
+mkdirs("D:/Data/QC_v8/bivar_stats_cat")
 
 # we save the var_config for QC use
-write_csv(final_config, "D:/Data/QC_v2/var_config.csv")
+write_csv(final_config, "D:/Data/QC_v8/var_config.csv")
 
 bivariate_stats_cat(input = combined, 
-                    var_config = "D:/Data/QC_v2/var_config.csv",
+                    var_config = "D:/Data/QC_v8/var_config.csv",
                     outcome_var = "discontinue_flg", 
-                    output_dir = "D:/Data/QC_v2/bivar_stats_cat",
+                    output_dir = "D:/Data/QC_v8/bivar_stats_cat",
                     count = 5, 
                     vargt0 = FALSE)
 ```
@@ -171,7 +171,7 @@ var_selected = setdiff(var_selected$Column, var2ignore)
   
 count_stat = vector(mode = "list", length = length(var_selected))
 
-mkdirs("D:/Data/QC_v2/univar_cond")
+mkdirs("D:/Data/QC_v8/univar_cond")
 for (j in 1:length(var_selected)) {
   var_index = var_selected[j]
   print( sprintf("%s", var_index))
@@ -190,7 +190,7 @@ for (j in 1:length(var_selected)) {
     description = Description[[var_index]],
     alpha_cut_off = 0.95, rm.zero = rm.zero_)
   eer_ = count_stat[[j]]$eer
-  fname = sprintf( "D:/Data/QC_v2/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",var_index )
+  fname = sprintf( "D:/Data/QC_v8/univar_cond/main_biogen_explore_combined_data_datediff__cond_density__%s.png",var_index )
 
   ggsave(fname, plot = last_plot())
   
@@ -201,7 +201,7 @@ pos_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$pos)})) )
 neg_ = as.numeric(as.data.frame( lapply(count_stat, function(x) {(x$neg)})) )
 
 eer_table = tibble(Column = var_selected, eer = eer_,`# pos` = pos_, `# neg` = neg_)
-write_csv(eer_table, 'D:/Data/QC_v2/num_eer_analysis.csv')
+write_csv(eer_table, 'D:/Data/QC_v8/num_eer_analysis.csv')
 
 ```
 
@@ -211,36 +211,36 @@ write_csv(eer_table, 'D:/Data/QC_v2/num_eer_analysis.csv')
 config_ = final_config %>% filter( Type=="numerical" 
                              | Type =="key" | Column =="discontinue_flg")
 
-write_csv(config_, "D:/Data/QC_v2/var_config_numeric.csv")
+write_csv(config_, "D:/Data/QC_v8/var_config_numeric.csv")
 
 
 data_ = combined %>%   select(matches(paste(config_$Column, collapse="|")))
 
 bivar_stats_y_flag(input = data_, #as.data.frame(numeric(data__)), 
-  var_config = "D:/Data/QC_v2/var_config_numeric.csv",
+  var_config = "D:/Data/QC_v8/var_config_numeric.csv",
   outcome_var = "discontinue_flg",
-  output_dir = "D:/Data/QC_v2/bivar_stats_num")
+  output_dir = "D:/Data/QC_v8/bivar_stats_num")
 ```
 
 ## Further filter out variables
 ```{r}
-eer_table = read_csv('D:/Data/QC_v2/num_eer_analysis.csv')
+eer_table = read_csv('D:/Data/QC_v8/num_eer_analysis.csv')
 
 # windows2unix_path <- function (windows_path) {
 #   return(str_replace(windows_path,'\\','/'))
 # }
   
 table_ = eer_table %>% filter( eer <=0.04 )
-write_csv(table_,'D:/Data/QC_v2/var_removed_due_to_low_eer.csv')
+write_csv(table_,'D:/Data/QC_v8/var_removed_due_to_low_eer.csv')
 
 View(eer_table)
 table_ = eer_table %>% filter( eer >0.04 )
 
 table__ = table_ %>% filter( `# pos`<=5 )
-write_csv(table__,'D:/Data/QC_v2/var_removed_due_to_npos_ls_05.csv')
+write_csv(table__,'D:/Data/QC_v8/var_removed_due_to_npos_ls_05.csv')
 
 table__ = eer_table %>% filter( eer >0.04 ) %>% filter( `# pos` > 5 & `# pos`<=10 )
-write_csv(table__,'D:/Data/QC_v2/var_removed_due_to_npos_ls_10.csv')
+write_csv(table__,'D:/Data/QC_v8/var_removed_due_to_npos_ls_10.csv')
 
 ```
 
@@ -248,6 +248,6 @@ write_csv(table__,'D:/Data/QC_v2/var_removed_due_to_npos_ls_10.csv')
 ```{r}
 
 table.remaining = eer_table %>% filter( eer >0.04 ) %>% filter( `# pos`>10 ) 
-write_csv(table.remaining,'D:/Data/QC/var_remained.csv')
+write_csv(table.remaining,'D:/Data/QC_v8/var_remained.csv')
 
 ```

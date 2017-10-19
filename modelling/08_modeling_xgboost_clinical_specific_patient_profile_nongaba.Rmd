@@ -103,16 +103,18 @@ dim(config_)
 ## Divide data HCP, count, diff
 
 ```{r}
-var2use = vector('list',4)
-var2use[[1]] = config_$Column [ config_$v1]
-var2use[[2]] = config_$Column [ config_$v1 | config_$v2]
-var2use[[3]] = config_$Column [ config_$v1 | config_$v2 | config_$v3]
-var2use[[4]] = config_$Column [ config_$v1 | config_$v2 | config_$v3 | config_$v4 ]
-var2use[[5]] = config_$Column [ config_$v3 ] # resource only
+var2use = vector('list',3)
+var2use[[1]] = config_$Column [ config_$v2] 
+var2use[[1]] =  var2use[[1]] [ str_detect(var2use[[1]],'num') ]
 
-cname = paste0('v',1:5)
+var2use[[2]] = config_$Column [ config_$v2] 
+var2use[[2]] =  var2use[[2]] [ str_detect(var2use[[2]],'diff') ]
 
-for (i in 1:5) {
+var2use[[3]] = config_$Column [ config_$v2]
+
+cname = paste0('v',1:3)
+
+for (i in 1:3) {
   print( length(var2use[[i]]) )
 }
 ```
@@ -140,7 +142,7 @@ write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
 
 ```{r}
 
-for (i in 2) {
+for (i in 1:3) {
   
   results_dir_  = paste0(results_dir,'xgb_profile_', cname[i],'/')
   mkdirs(results_dir_)
@@ -211,20 +213,23 @@ for (i in 2) {
   colnames_ = make_var_name(colnames(data))
   colnames(data) = colnames_
   
-  #divide into training and testing
+  #----------------------------------------------------------------------------------------
+  #divide into training and testing -- code not used for now
   k = dismo::kfold(data, 5, by=data$label)
   k_train = which(k<=4)
   k_test = which(k==5)
+
+  #----------------------------------------------------------------------------------------
+  # Train on the entire data set and test on it
   
-  #dataset = makeClassifTask(id='full', data=data[k_train,], target='label', positive=1)
-  #dataset_test = makeClassifTask(id='full', data=data[k_test,], target='label', positive=1)
   dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
   
   lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
   lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
   trained_model <- train(lrn_xgb, dataset)
   
-  write_xgb_model(trained_model, results_dir = results_dir_, dataset = dataset)
+  write_xgb_model(trained_model, results_dir = results_dir_, 
+    dataset = dataset, description = Description)
   
   #pred <- predict(trained_model, dataset_test)
   pred <- predict(trained_model, dataset)
@@ -235,16 +240,14 @@ for (i in 2) {
   
   dim(pred$data)
   length(k_test)
-  #lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
-  
-  
+
+    
   #get the order by prob.1
   order = sort(pred$data$prob.1, index.return=TRUE, decreasing=TRUE)
   
   #checking
   top_n = 20
   pred$data$prob.1[ order$ix[1:top_n] ]
-  
   
   #re-order it
   pred_reordered = pred$data[order$ix,]
@@ -266,24 +269,71 @@ for (i in 2) {
   write_csv(table_,
     paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited.csv'))
 
-  #
-  flag_is_na = table_$V1 == '0' |  is.na(table_$V1) 
-  mytable = as.data.frame(table(table_$var_grouping, flag_is_na))
-  write_csv(mytable,
-     paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited_p1.csv'))       
-  #write_csv(top_20_patients,
-  #  paste0(results_dir_,'top_20_pat_model2_combined.csv'))
+  #----------------------------------------------------------------------------------------
+  # this part of the code does cross validation
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
   
-  #write.table(table_,
-  #  paste0(results_dir_,'top_20_pat_model2_combined_transposed.csv'),
-  #  row.names = TRUE,  sep = ",")
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
   
-  #load the file
-  #table_ = read_csv(paste0(results_dir_,'top_20_pat_model2_combined_transposed.csv'))
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
   
-   #write.table(table_,
-   #  paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited.csv'),
-   #  row.names = TRUE,  sep = ",")
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  analyse_res_cv(res, results_dir = results_dir_)
+
 }
+
+```
+
+## print var importance
+# 
+# ```{r}
+# Description = hashmap(config$Column, config$Description)
+# 
+# vi_fnames = vector('list',3)
+# for (i in 1:3) {
+#   vi_fnames[[i]]  = paste0(results_dir,
+#     'xgb_profile_',cname[i],
+#     '/VI_XGB_freq_singlemodel.csv')
+# }
+# 
+# # add the description back
+# vi = vector('list',3)
+# for (i in 1:3) {
+#   vi[[i]] = read_csv(vi_fnames[[i]])
+#   vi[[i]]$Description = Description [[vi[[i]]$Feature]]
+#   fname = paste0(results_dir,
+#     'xgb_profile_',cname[i],
+#     '/VI_XGB_freq_singlemodel_Decription.csv')
+#   write_csv(vi[[i]], fname)
+# }
+#```
+
+
+## Load the PR curves
+```{r}
+fnames = vector('list',3)
+for (i in 1:3) {
+  fnames[[i]]  = paste0(results_dir,
+    'xgb_profile_',cname[i],
+    '/PRCurve_XGB_3fold_freq_100_bins.csv')
+}
+
+prec = vector('list',3)
+for (i in 1:3) {
+  prec[[i]] = read_csv(fnames[[i]])
+}
+
+nbin = 20
+table_ = tibble( prec[[1]]$rec_binned[1:nbin], prec[[1]]$prec[1:nbin], 
+  prec[[2]]$prec[1:nbin], prec[[3]]$prec[1:nbin])
+colnames(table_) = c('Recall bin', cname[1:3])
+
+write_csv(table_, paste0(results_dir,'PR_curves.csv'))
+```
+```{bash}
 
 ```

@@ -1,4 +1,4 @@
-write_xgb_model <- function(xgb_model, dataset, results_dir="./") {
+write_xgb_model <- function(xgb_model, dataset, results_dir="./", description = NA) {
   # write out model:
   saveRDS(xgb_model, paste0(results_dir, "XGB_preliminary_model.rds"))
   
@@ -18,8 +18,15 @@ write_xgb_model <- function(xgb_model, dataset, results_dir="./") {
     label = train_numeric$label)
   
   # write out:
-  write_csv(importance_model, 
-    paste0(results_dir, "VI_XGB_freq_singlemodel.csv"))
+  if ( is.na(description) ) {
+    write_csv(importance_model, 
+              paste0(results_dir, "VI_XGB_freq_singlemodel.csv"))
+  } else {
+    importance_model$Description = description [[importance_model$Feature]]
+    write_csv(importance_model, 
+              paste0(results_dir, "VI_XGB_freq_singlemodel_Description.csv"))
+  }    
+  
   write_csv(detailed_imp,
     paste0(results_dir,"Detailed_VI_XGB_freq_singlemodel.csv"))
 
