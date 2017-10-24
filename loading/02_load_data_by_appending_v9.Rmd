@@ -1,0 +1,157 @@
+---
+title: "Load data"
+author: "Norman Poh"
+date: "2 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Init
+```{r}
+setwd("L:/loading")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/config_with_colnames_with_v.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+sourceDirectory("../lib")
+
+# Using Windows prompt, map the data folder to D drive, e.g., 
+# net use D: \\localhost\C$\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```
+
+## Load the processed data
+
+```{r}
+config = read_csv('D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv')
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_data.rds")
+
+# get the mapping ready
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+Description = hashmap(config$Column, config$Description)
+
+```
+
+## Load the new patient data
+
+```{r}
+raw = read_csv("D:/Data/Flat_File_v9/BGN_1158015_pat_newvars.csv",
+    col_types = (cols(PAT_ID = col_character(), .default = col_guess())))
+colnames(raw) = str_to_lower(colnames(raw))
+
+dup_indices = duplicated( raw$pat_id)
+
+sum(dup_indices)
+#raw_dup = raw[dup_indices,]
+#raw = raw[!dup_indices,]
+
+length(unique(combined$pat_id))
+length(unique(raw$pat_id))
+
+
+colnames_raw = colnames(raw)
+var_additional = setdiff(colnames_raw, 'pat_id')
+```
+## try combining them
+
+```{r}
+dim(raw)
+
+combined_new = left_join(combined %>% select(-one_of(var_additional)),
+  raw %>% select(one_of(c('pat_id', var_additional))), by='pat_id')
+
+config = config_with_colnames_with_v(config, colnames(combined_new))
+
+sum(config$Column == colnames(combined_new))
+
+dim(combined_new)
+```
+
+## create the date difference
+
+```{r}
+
+var_new = var_additional [str_detect(var_additional, 'fst|lst')]
+
+# work with the date variables only
+colnames_ = colnames(combined_new)
+
+date_ = combined_new %>% select(  one_of(c(var_new, 'idx_dt')))
+
+date__ <- as.data.frame(  sapply(date_, mdy))
+date_ = create_date_diffs(date__, index_col = "idx_dt")
+colnames_original = colnames(date_)
+colnames(date_) = paste0(colnames_original, '_diff')
+
+colnames_datediff_var = colnames(date_)
+
+combined_new[,colnames_datediff_var] = date_
+
+# #update the config file
+# numUniqueValues = tibble(value = sapply(date_, function(x) {length(unique((x)))}))
+# 
+# new_row = tibble(Column = colnames_datediff_var, 
+#        Type='numerical',
+#        NumUniqueValues=numUniqueValues$value,
+#        var_period = var_period[[colnames_original]],
+#        var_grouping = var_grouping[[colnames_original]],
+#        isdate=FALSE,
+#        Description = paste0('Date difference between index and ',Description[[colnames_original]]),
+#        v0=FALSE,
+#        v1=FALSE,
+#        v2=FALSE,
+#        v3=FALSE,
+#        v4=FALSE
+#        )
+# 
+# config = rbind(config, new_row)
+config = config_with_colnames_with_v(config, colnames(combined_new))
+sum(config$Column == colnames(combined_new))
+colnames(combined_new)
+```
+
+## quick checking
+```{r}
+stat_ = as.data.frame(t((sapply(date_, mystat))))
+stat_
+```
+
+## saving
+```{r}
+sum( colnames(combined_new) == config$Column)
+
+saveRDS(combined_new, "D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+saveRDS(config,       "D:/Data/Processed/archive/combined_date_complied_rectified_num_gaba_copay_config.rds")
+
+write_csv(combined_new, "D:/Data/Processed/archive/combined_date_complied_rectified_num_gaba_copay_data.csv")
+write_csv(config,       "D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+
+```

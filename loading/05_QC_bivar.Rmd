@@ -44,8 +44,8 @@ source("L:/Lib/write_xgb_model.R")
 ```
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv")
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
 results_dir = "D:/Data/QC_v8/univar"
 mkdirs(results_dir)
 
@@ -55,11 +55,11 @@ mkdirs(results_dir)
 
 ```{r}
 univar_results <- univariate_stats(input = combined,
-  var_config = "D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv",
+  var_config = "D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv",
   output_dir = "D:/Data/QC_v8/univar",
   vargt0 = FALSE)
 
-View(univar_results$cat)
+#View(univar_results$cat)
 
 ```
 ## remove variables that are poorly populated
@@ -221,7 +221,22 @@ bivar_stats_y_flag(input = data_, #as.data.frame(numeric(data__)),
   outcome_var = "discontinue_flg",
   output_dir = "D:/Data/QC_v8/bivar_stats_num")
 ```
+## correlation
 
+```{r}
+config_ = final_config %>% filter( Column %in% var_selected)
+write_csv(config_, "D:/Data/QC_v8/var_config_numeric_corr.csv")
+
+
+data_ = combined %>%   select( one_of(var_selected ))
+
+value_ = correlation(input = data_, 
+  var_config = "D:/Data/QC_v8/var_config_numeric_corr.csv",
+  output_dir = "D:/Data/QC_v8/correlation",
+  method = "spearman",
+  correlation_warning = FALSE,
+  output_csv = TRUE)
+```
 ## Further filter out variables
 ```{r}
 eer_table = read_csv('D:/Data/QC_v8/num_eer_analysis.csv')

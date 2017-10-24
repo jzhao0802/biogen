@@ -1,0 +1,133 @@
+---
+title: "Bayesian inference"
+author: "Norman Poh"
+date: "20 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+library(glmnet)
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+
+```
+
+```{r}
+
+results_dir = "D:/Results/modelling_08_copay/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+
+```
+
+## Get the map up
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+
+```
+
+## Bayesian inference
+```{r}
+
+fit_kde <- function(x) {x
+  kde = density(x, na.rm = TRUE)
+  f=approxfun(kde$x, kde$y, yleft=0, yright=0)
+  return(f)
+}
+
+
+llh_u = fit_kde(combined$post_ae_fst1_diff)
+llh_0 = fit_kde(combined$post_ae_fst1_diff[ combined$discontinue_flg==0 ] )
+llh_1 = fit_kde(combined$post_ae_fst1_diff[ combined$discontinue_flg==1 ] )
+
+stat_ = mystat(combined$post_ae_fst1_diff)
+x = seq(stat_[1], stat_[2],length=100)
+
+# cdf = integrate(f, -Inf, 200)  # replace '2' by any other value.
+#melt(data, id.vars, measure.vars, variable.name = "variable"
+  
+prob_ = llh_1(x) /(llh_1(x) + llh_0(x))
+
+dat_ = combined %>% select( one_of(c('post_ae_fst1_diff','discontinue_flg')))
+dat_ = dat_[!is.na(dat_$post_ae_fst1_diff),]
+                     
+target_tab = as.numeric(table(dat_$discontinue_flg))
+iw = 1/target_tab[dat_$discontinue_flg+1] 
+
+glm_ = glmnet(x=cbind(dat_$post_ae_fst1_diff, 1),
+                      y=as.factor(dat_$discontinue_flg), 
+                      family="binomial",
+              weights = iw)
+
+prob_lr = predict(glm_, cbind(x, 1), type='response', s=0.01)
+
+mat =  rbind( tibble(x=x, y =llh_0(x) * 20, type='llh 0'),
+              tibble(x=x, y =llh_1(x) * 20, type='llh 1'),
+              tibble(x=x, y = prob_ , type ='Prob-Bayes'),
+              tibble(x=x, y = as.numeric(prob_lr) , type ='Prob-LR')
+              )
+```
+## Plotting
+
+```{r}
+ggplot(data=mat, aes(x=x, y=y, group = type, colour = type)) +
+    geom_line() +
+    geom_point( size=2, shape=21)  + #, fill="white")
+    xlab(Description[['post_ae_fst1_diff']]) +
+    ylab('Likelihood x 20, Probability')
+
+ggplot(data=mat %>% filter( type %in% c('llh 0','llh 1')), 
+       aes(x=x, y=y, group = type, colour = type)) +
+    geom_line() +
+    geom_point( size=2, shape=21)  + #, fill="white")
+    xlab(Description[['post_ae_fst1_diff']]) +
+    ylab('Likelihood')
+
+```

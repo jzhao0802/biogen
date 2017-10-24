@@ -52,15 +52,15 @@ source("L:/Lib/write_xgb_model.R")
 
 ```{r}
 
-results_dir = "D:/Results/modelling_07_clinical_specific/"
+results_dir = "D:/Results/modelling_08_copay/"
 mkdirs(results_dir)
 ```
 
 ## Load the original variables
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_config.csv")
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
 
 ```
 
@@ -92,8 +92,6 @@ combined_ = combined %>% select( -one_of(var2eliminate))
 
 length(config_$Column) 
 
-
-
 dim(combined_)
 dim(config_) 
 
@@ -106,8 +104,8 @@ var2use = vector('list',4)
 var2use[[1]] = config_$Column [ config_$v1]
 var2use[[2]] = config_$Column [ config_$v1 | config_$v2]
 var2use[[3]] = config_$Column [ config_$v1 | config_$v2 | config_$v3]
-var2use[[4]] = config_$Column [ config_$v1 | config_$v2 | config_$v3 | config_$v4 ]
-var2use[[5]] = config_$Column [ config_$v3 ] # resource only
+var2use[[4]] = config_$Column [ config_$v3 ]  # resource only
+var2use[[5]] = config_$Column [ config_$v2 | config_$v3 ]
 
 cname = paste0('v',1:5)
 
@@ -146,7 +144,7 @@ write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
 
 ```{r}
 
-for (i in 1:3) {
+for (i in 1:5) {
   
   results_dir_  = paste0(results_dir,'xgb_profile_', cname[i],'/')
   mkdirs(results_dir_)
@@ -290,53 +288,26 @@ for (i in 1:3) {
 }
 
 ```
-
-## print var importance
-
-```{r}
-Description = hashmap(config$Column, config$Description)
-
-vi_fnames = vector('list',3)
-for (i in 1:3) {
-  vi_fnames[[i]]  = paste0(results_dir,
-    'xgb_profile_',cname[i],
-    '/VI_XGB_freq_singlemodel.csv')
-}
-
-# add the description back
-vi = vector('list',3)
-for (i in 1:3) {
-  vi[[i]] = read_csv(vi_fnames[[i]])
-  vi[[i]]$Description = Description [[vi[[i]]$Feature]]
-  fname = paste0(results_dir,
-    'xgb_profile_',cname[i],
-    '/VI_XGB_freq_singlemodel_Decription.csv')
-  write_csv(vi[[i]], fname)
-}
-
-
-
-```
 ## Load the PR curves
 ```{r}
-fnames = vector('list',3)
-for (i in 1:3) {
+num_curve = 5
+fnames = vector('list',num_curve)
+for (i in 1:num_curve) {
   fnames[[i]]  = paste0(results_dir,
     'xgb_profile_',cname[i],
     '/PRCurve_XGB_3fold_freq_100_bins.csv')
 }
 
-prec = vector('list',3)
-for (i in 1:3) {
+prec = vector('list',num_curve)
+for (i in 1:num_curve) {
   prec[[i]] = read_csv(fnames[[i]])
 }
 
-table_ = tibble( prec[[1]]$rec_binned[1:100], prec[[1]]$prec[1:100], 
-  prec[[2]]$prec[1:100], prec[[3]]$prec[1:100])
-colnames(table_) = c('Recall bin', cname[1:3])
+prec_ = as.data.frame(lapply(prec, function (x) { x$prec }))
+colnames(prec_) = paste0('prec_',1:ncol(prec_))
+
+table_ =  cbind(prec[[1]]$rec_binned, prec_)
+colnames(table_) = c('Recall bin', cname[1:num_curve])
 
 write_csv(table_, paste0(results_dir,'PR_curves.csv'))
-```
-```{bash}
-
 ```
