@@ -324,11 +324,39 @@ correlation <- function(pair) {
 
 combi__ = cbind(table__$V1,table__$V2)
 dim(combi__)
+
+# dry run
+op <- options(warn = (-1)) # suppress warnings 
 tictoc::tic()
 out_ = data.table::rbindlist(as.matrix(apply(combi__[1:100,], 1,correlation)))
 tictoc::toc()
-```
+options(op) # reset the default value
 
+```
+# run the program -- this will take some times
+
+```{r}
+op <- options(warn = (-1)) # suppress warnings 
+tictoc::tic()
+out_ = data.table::rbindlist(as.matrix(apply(combi__, 1,correlation)))
+tictoc::toc()
+options(op) # reset the default value
+
+corr = cbind(combi__, as_tibble(out_))
+corr$Description_v1 = Description[[colnames_[corr$`1`]]]
+corr$Description_v2 = Description[[colnames_[corr$`2`]]]
+
+out_ = as.data.frame(unlist(apply(combi__, 1,is.na_pair)))
+colnames(out_) = 'Count'
+corr$Count = out_$Count
+corr$Completeness = out_$Count / max(out_$Count)
+
+colname__ = c("1", "2", "Completeness", "Count", "pearson_corr", "pearson_p.value" , "spearman_rho", "spearman_p.value", "Description_v1", "Description_v2")
+corr = corr %>% select(one_of(colname__))
+saveRDS(corr, 'D:/Data/QC_v8/corr.RDS')
+corr = readRDS('D:/Data/QC_v8/corr.RDS')
+write_csv(corr, 'D:/Data/QC_v8/corr.csv')
+```
 
 ## Further filter out variables
 ```{r}
