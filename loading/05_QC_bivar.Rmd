@@ -221,22 +221,115 @@ bivar_stats_y_flag(input = data_, #as.data.frame(numeric(data__)),
   outcome_var = "discontinue_flg",
   output_dir = "D:/Data/QC_v8/bivar_stats_num")
 ```
-## correlation
-
+## correlation -- attempt 1 -- not successful
 ```{r}
 config_ = final_config %>% filter( Column %in% var_selected)
-write_csv(config_, "D:/Data/QC_v8/var_config_numeric_corr.csv")
-
+write_csv(config_, "D:/Data/QC_v8/correlation/var_config_numeric.csv")
 
 data_ = combined %>%   select( one_of(var_selected ))
 
-value_ = correlation(input = data_, 
-  var_config = "D:/Data/QC_v8/var_config_numeric_corr.csv",
+univar_results <- univariate_stats(input = data_,
+  var_config = "D:/Data/QC_v8/correlation/var_config_numeric.csv",
   output_dir = "D:/Data/QC_v8/correlation",
-  method = "spearman",
-  correlation_warning = FALSE,
+  vargt0 = FALSE)
+
+#read_csv("D:/Data/QC_v8/correlation/univar_stats_x_num.csv")
+NonMissingProp = hashmap(univar_results$numerical$Variable,
+  univar_results$numerical$`Non-missing, N`)
+varlist = univar_results$numerical$Variable
+var2exclude = which(univar_results$numerical$`Non-missing, N` <=50)
+
+varlist = varlist[-var2exclude]
+
+config_ = final_config %>% filter( Column %in% varlist)
+write_csv(config_, "D:/Data/QC_v8/correlation/var_config_numeric_corr.csv")
+
+data_ = combined %>%   select( one_of(varlist ))
+
+value_ = correlation(input = data_, 
+  var_config = "D:/Data/QC_v8/correlation/var_config_numeric_corr.csv",
+  output_dir = "D:/Data/QC_v8/correlation",
+  method = "pearson",
+  #method = "spearman",
+  correlation_warning = TRUE,
   output_csv = TRUE)
+
+
+out_ = as.data.frame(sort(unlist(lapply(data_, function(x) sum(!is.na(x))))))
+colnames(out_)="value"
+countMap = hashmap(rownames(out_), out_$value)
+
 ```
+## correlation -- attempt 2
+```{r}
+# detect the variable class by type
+ischar = as.data.frame(sapply(combined, class))
+colnames(ischar) = 'class'
+ischar$Column = rownames(ischar)
+rownames(ischar) = NULL
+
+var_selected = ischar %>% filter(class == 'numeric' |class=='integer') %>% select( one_of('Column'))
+
+# get the selected variable ==> var_selected
+var_selected = ischar %>% filter(class == 'numeric' |class=='integer') %>% select( one_of('Column'))
+ 
+var2ignore = config$Column[ config$Type=="others" |  
+  str_detect(config$Column, "npi|age_group|hce_id|pat_id") ]
+    
+var_selected = setdiff(var_selected$Column, var2ignore)
+
+data_ = combined %>%   select( one_of(var_selected ))
+
+stat_ = as.data.frame(sort(unlist(lapply(data_, function(x) sum(!is.na(x))))))
+colnames(stat_)="value"; stat_$Column = rownames(stat_); rownames(stat_)=NULL
+
+#combi_ = pracma::nchoosek(length(stat_$Column), 2)
+colnames_ = colnames(data_)
+combi_ = combn(length(colnames_), 2)
+combi_ = t(combi_) 
+
+# define a helper function to count concurrent occurence of a pair of variables given their indices
+is.na_pair <- function(pair) {
+  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]])
+  return(sum(selected))
+}
+
+#apply row-by-row
+out_ = as.data.frame(unlist(apply(combi_, 1,is.na_pair)))
+colnames(out_) = 'Count'
+
+#create the table
+table_ = tibble(V1 = combi_[,1], V2 = combi_[,2] )
+table_$Count = out_$Count
+table_$`Completeness` = table_$Count/nrow(data_)
+table_$Description_V1 = Description[[colnames_[combi_[,1]]]]
+table_$Description_V2 = Description[[colnames_[combi_[,2]]]]
+
+table__ = table_ %>% arrange(desc(Count)) %>% filter( Count >=5)
+
+# Compute correlation
+
+correlation <- function(pair) {
+  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]])
+  value_pearson = cor.test(data_[selected,pair[1]], data_[selected,pair[2]],
+           method = 'pearson')
+  value_spearman = cor.test(data_[selected,pair[1]], data_[selected,pair[2]],
+           method = 'spearman')
+  return( list(pearson_corr = value_pearson$estimate,
+     pearson_p.value = value_pearson$p.value,
+     spearman_rho = value_spearman$estimate,
+     spearman_p.value = value_pearson$p.value
+  ))
+}
+
+combi__ = cbind(table__$V1,table__$V2)
+dim(combi__)
+tictoc::tic()
+out_ = data.table::rbindlist(as.matrix(apply(combi__[1:100,], 1,correlation)))
+tictoc::toc()
+```
+
+
 ## Further filter out variables
 ```{r}
 eer_table = read_csv('D:/Data/QC_v8/num_eer_analysis.csv')
