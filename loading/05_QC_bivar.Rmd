@@ -262,6 +262,7 @@ countMap = hashmap(rownames(out_), out_$value)
 ```
 ## correlation -- attempt 2
 ```{r}
+
 # detect the variable class by type
 ischar = as.data.frame(sapply(combined, class))
 colnames(ischar) = 'class'
@@ -274,14 +275,14 @@ var_selected = ischar %>% filter(class == 'numeric' |class=='integer') %>% selec
 var_selected = ischar %>% filter(class == 'numeric' |class=='integer') %>% select( one_of('Column'))
  
 var2ignore = config$Column[ config$Type=="others" |  
-  str_detect(config$Column, "npi|age_group|hce_id|pat_id") ]
+  str_detect(config$Column, "npi|age_group|hce_id|pat_id|flg") ]
     
 var_selected = setdiff(var_selected$Column, var2ignore)
 
 data_ = combined %>%   select( one_of(var_selected ))
 
-stat_ = as.data.frame(sort(unlist(lapply(data_, function(x) sum(!is.na(x))))))
-colnames(stat_)="value"; stat_$Column = rownames(stat_); rownames(stat_)=NULL
+#stat_ = as.data.frame(sort(unlist(lapply(data_, function(x) sum(!is.na(x))))))
+#colnames(stat_)="value"; stat_$Column = rownames(stat_); rownames(stat_)=NULL
 
 #combi_ = pracma::nchoosek(length(stat_$Column), 2)
 colnames_ = colnames(data_)
@@ -290,7 +291,8 @@ combi_ = t(combi_)
 
 # define a helper function to count concurrent occurence of a pair of variables given their indices
 is.na_pair <- function(pair) {
-  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]])
+  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]]) & 
+    data_[,pair[1]] >0 & data_[,pair[2]] >0 
   return(sum(selected))
 }
 
@@ -299,6 +301,7 @@ out_ = as.data.frame(unlist(apply(combi_, 1,is.na_pair)))
 colnames(out_) = 'Count'
 
 #create the table
+Description = hashmap(config$Column, config$Description)
 table_ = tibble(V1 = combi_[,1], V2 = combi_[,2] )
 table_$Count = out_$Count
 table_$`Completeness` = table_$Count/nrow(data_)
@@ -310,7 +313,8 @@ table__ = table_ %>% arrange(desc(Count)) %>% filter( Count >=5)
 # Compute correlation
 
 correlation <- function(pair) {
-  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]])
+  selected = !is.na( data_[,pair[1]]) & !is.na( data_[,pair[2]]) & 
+    data_[,pair[1]] >0 & data_[,pair[2]] >0 
   value_pearson = cor.test(data_[selected,pair[1]], data_[selected,pair[2]],
            method = 'pearson')
   value_spearman = cor.test(data_[selected,pair[1]], data_[selected,pair[2]],
@@ -342,22 +346,50 @@ out_ = data.table::rbindlist(as.matrix(apply(combi__, 1,correlation)))
 tictoc::toc()
 options(op) # reset the default value
 
-corr = cbind(combi__, as_tibble(out_))
-corr$Description_v1 = Description[[colnames_[corr$`1`]]]
-corr$Description_v2 = Description[[colnames_[corr$`2`]]]
+dim(out_)
+dim(combi__)
+dim(table__)
 
-out_ = as.data.frame(unlist(apply(combi__, 1,is.na_pair)))
-colnames(out_) = 'Count'
-corr$Count = out_$Count
-corr$Completeness = out_$Count / max(out_$Count)
+corr = cbind(out_, table__)
+corr = corr %>% select(one_of(c('Count', 'Completeness')), everything())
 
-colname__ = c("1", "2", "Completeness", "Count", "pearson_corr", "pearson_p.value" , "spearman_rho", "spearman_p.value", "Description_v1", "Description_v2")
-corr = corr %>% select(one_of(colname__))
-saveRDS(corr, 'D:/Data/QC_v8/corr.RDS')
-corr = readRDS('D:/Data/QC_v8/corr.RDS')
-write_csv(corr, 'D:/Data/QC_v8/corr.csv')
+#add unique Count
+nUnique_ = (as.data.frame(sapply(data_,function (x) {length(unique(x))})))
+colnames(nUnique_) = 'value'
+
+corr$`Number of unique values in V1` = nUnique_$value[corr$V1]
+corr$`Number of unique values in V2` = nUnique_$value[corr$V2]
+
+corr$V1_name = colnames_[corr$V1]
+corr$V2_name = colnames_[corr$V2]
+
+saveRDS(corr, 'D:/Data/QC_v8/corr_v2.RDS')
+corr = readRDS('D:/Data/QC_v8/corr_v2.RDS')
+write_csv(corr, 'D:/Data/QC_v8/corr_v2.csv')
+
+write_csv(corr %>% filter(!is.na(corr$pearson_corr)), 'D:/Data/QC_v8/corr_v2_no_na.csv')
+
+
+
 ```
 
+## Check
+```{r}
+no_answer = which(is.na(corr$pearson_corr))
+#debug(correlation)
+pair = combi__[no_answer,]
+correlation(pair[1,])
+
+
+cbind(nUnique_$value[pair[,1]], nUnique_$value[pair[,2]])
+
+for (j in 1:15) {
+  #psych::scatterHist(x=data_[,pair[j,1]], y=data_[,pair[j,2]], xlab=colnames_[pair[j,1]], ylab=colnames_[pair[j,2]])
+  plot(x=data_[,pair[j,1]], y=data_[,pair[j,2]], xlab=colnames_[pair[j,1]], ylab=colnames_[pair[j,2]])
+}
+             
+
+```
 ## Further filter out variables
 ```{r}
 eer_table = read_csv('D:/Data/QC_v8/num_eer_analysis.csv')
