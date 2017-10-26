@@ -367,10 +367,17 @@ saveRDS(corr, 'D:/Data/QC_v8/corr_v2.RDS')
 corr = readRDS('D:/Data/QC_v8/corr_v2.RDS')
 write_csv(corr, 'D:/Data/QC_v8/corr_v2.csv')
 
-write_csv(corr %>% filter(!is.na(corr$pearson_corr)), 'D:/Data/QC_v8/corr_v2_no_na.csv')
+write_csv(corr %>% filter(!is.na(corr$pearson_corr)), 'D:/Data/QC_v8/corr_v2_noNA.csv')
 
+# further filter on variables actually used for prediction
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+var2use = config$Column [ config$v1 | config$v2 | config$v3]
 
-
+selected = corr$V1_name %in% var2use & corr$V2_name %in% var2use
+write_csv(corr %>% 
+  filter(!is.na(corr$pearson_corr)) %>% 
+  filter(V1_name %in% var2use & V2_name %in% var2use), 
+  'D:/Data/QC_v8/corr_v2_noNA_var2use.csv')
 ```
 
 ## Check
