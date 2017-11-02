@@ -1,0 +1,446 @@
+---
+title: "Modelling with the agreed universe of features"
+author: "Norman Poh"
+date: "17 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+
+source_files <- list.files("F:/Lachlan/biogen_tecfidera/lib", full.names = TRUE)
+
+for(i in 1:length(source_files)) {
+  source(source_files[i])
+}
+
+# LM not needed:
+# source("L:/Lib/analyse_res_cv.R")
+# #source("L:/Lib/analyse_res_cv_original.R")
+# 
+# source("L:/Lib/calculate_eer.R")
+# source("L:/Lib/calculate_eer_thrd.R")
+# source("L:/Lib/cal_formatted_confusion_matrix.R")
+# 
+# source("L:/Lib/config_with_colnames.R")
+# source("L:/Lib/create_date_diffs.R")
+# source("L:/Lib/cut_linux.R")
+# source("L:/Lib/factor2numeric.R")
+# source("L:/Lib/make_negative.R")
+# source("L:/Lib/make_positive.R")
+# source("L:/Lib/make_var_name.R")
+# source("L:/Lib/mystat.R")
+# source("L:/Lib/plot_cond_density.R")
+# source("L:/Lib/remove_inf.R")
+# source("L:/Lib/remove_na.R")
+# source("L:/Lib/write_xgb_model.R")
+
+```
+
+```{r}
+# what is this for?
+results_dir = "D:/Results/modelling_08_copay_test/"
+mkdirs(results_dir)
+
+# LM: define data dir:
+data_dir <- "F:/Projects/Biogen_Tecfidera/Data/Processed/"
+
+```
+
+## Load the original variables
+
+```{r}
+combined = read_rds(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_data.rds"))
+config = read_csv(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_config.csv"))
+
+```
+
+## Get the map up
+
+```{r}
+# LM: I haven't used these. They look cool but what are they for?
+Description = hashmap(config$Column, config$Description)
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+```
+
+## remove the variables!
+
+```{r}
+config$v0  = !(config$v1 | config$v2 | config$v3 | config$v4)
+
+# checking
+config__ = config %>% select( one_of(paste0('v',0:4)) )
+stat_ = as.data.frame(sapply(config__,sum))
+colnames(stat_) <- 'sum'
+stat_
+sum(stat_)
+
+#write_csv(config, 'D:/Results/modelling_06_clinical_specific/annotated_var_config_verified.csv')
+
+# LM: I find this difficult to read. I think we're removing variables at this
+# stage. Is it this?:
+# 1. eliminate vars which are TRUE in config$v0
+# 2. check lengths of new dataset and config to ensure they are as expected
+# following variable excludion
+var2eliminate = config$Column[  config$v0 ]
+config_ = config %>% filter( !(Column %in% var2eliminate ) )
+combined_ = combined %>% select( -one_of(var2eliminate))
+
+length(config_$Column) 
+
+dim(combined_)
+dim(config_) 
+
+```
+
+## Divide the data
+
+```{r}
+# var2use = vector('list',4)
+# LM edit:
+var2use <- list()
+var2use[[1]] = config_$Column [ config_$v1]
+var2use[[2]] = config_$Column [ config_$v1 | config_$v2]
+var2use[[3]] = config_$Column [ config_$v1 | config_$v2 | config_$v3]
+# LM: I believe these aren't going to be used??
+# var2use[[4]] = config_$Column [ config_$v3 ]  # resource only
+# var2use[[5]] = config_$Column [ config_$v2 | config_$v3 ]
+
+# LM: I'm changing this to 3 instead of 5
+cname = paste0('v',1:3)
+
+for (i in 1:length(var2use)) {
+  print( length(var2use[[i]]) )
+}
+
+# LM correction to use select_ and .dots. What is the purpose of this?:
+stat_ = as.data.frame(sapply(config_ %>% select_(.dots = paste0('v',0:4)), sum))
+colnames(stat_) = 'num_of_var'
+stat_
+# What is the purpose of this? Is it to check though the variable names?
+config_$Column[config_$v2]
+config_$Column[config_$v3]
+```
+## additional correction for the labelling; if we don't make these changes, mlr will complain!
+```{r}
+
+# LM: is the idea here to transform factors into numeric variables? E.g. if there
+# are n schools, do we end up with one numeric variable with n values,
+# or do we get n binary variables?
+
+mschool = factor2numeric(combined$medical_school_desc)
+combined$medical_school_desc = mschool$value
+mschool_table = tibble(key = mschool$map$keys() , value = mschool$map[[ mschool$map$keys() ]])
+#write_csv(mschool_table, "D:/Results/attributes/medical_school_desc.csv")
+
+specialty = factor2numeric(combined$specialty)
+combined$specialty = specialty$value
+specialty_table = tibble(key = specialty$map$keys() , value = specialty$map[[ specialty$map$keys() ]])
+#write_csv(specialty_table, "D:/Results/attributes/specialty.csv")
+
+specialty_cat = factor2numeric(combined$specialty_cat)
+combined$specialty_cat = specialty_cat$value
+specialty_cat_table = tibble(key = specialty_cat$map$keys() , value = specialty_cat$map[[ specialty_cat$map$keys() ]])
+#write_csv(specialty_cat_table, "D:/Results/attributes/specialty_cat.csv")
+
+```
+
+## Experiments
+
+```{r}
+
+for (i in 1:length(cname)) {
+  
+  results_dir_  = paste0(results_dir,'xgb_profile_', cname[i],'/')
+  mkdirs(results_dir_)
+  
+  # LM: generating dataset based on variables to use defined earlier.
+  config_ = config %>% filter( (Column %in% 
+    union_all('discontinue_flg','pat_id',var2use[[i]])  )) 
+  combined_ = combined %>% select( one_of(
+    union_all('discontinue_flg','pat_id',var2use[[i]])))
+  dim(config_)
+  dim(combined_)
+  
+  # LM: col index of patient ID column:
+  key = which(config_$Column=='pat_id')
+  # LM: extracting classes:
+  class_type = as.data.frame( sapply(combined_, class))
+  
+  # LM: extracting integers:
+  is_integer = class_type == "integer"
+  # LM: extracting the numerical, integers and categorical (does this override the above line?)
+  selected_num = which(config_$Type=="numerical" & ! is_integer)
+  selected_int = which(config_$Type=="numerical" & is_integer)
+  selected_cat = which(config_$Type=="categorical")
+  
+  selected_all = c(selected_cat, selected_int, selected_num)
+
+  var_stat = c(length(selected_cat), length(selected_num), length(selected_int))
+  var_stat
+  sum(var_stat)
+  
+  # LM: I believe extreme value capping isn't needed for XGBoost.
+  # # extreme value
+  # if (length(selected_num)>0) {
+  #   write_csv(config_[c(key,selected_num),], 
+  #     paste0(results_dir_, 'modelling_var_config_num.csv'))
+  #   combined_num = extreme_values(
+  #       combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
+  #       var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
+  #       pth = 0.99,
+  #       output_dir = results_dir_)
+  #   combined_num = combined_num$data %>%   select( - one_of('pat_id'))
+  # } else {
+  #   combined_num=combined_ %>% select( one_of('dodo'))
+  # }
+  
+  
+  # cat variable
+  if (length(selected_cat)>0) {
+    #write_csv(config_[c(key,selected_cat),],
+      #paste0(results_dir_, "modelling_var_config_cat.csv"))
+  
+    combined_cat = dummy_vars(combined_ %>% 
+      select( one_of(config_$Column[c(key,selected_cat)])),
+      var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'),
+      output_dir = NULL)
+      
+    combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
+  } else {
+    combined_cat=combined_ %>% select( one_of('dodo'))
+  }
+  
+  #integer variable
+  combined_int = combined_ %>% select( one_of(config_$Column[c(selected_int)]))
+  
+  #now we have: combined_num, combined_cat, combined_int, so we can run xgboost
+  data = cbind(combined_cat, combined_num, combined_int)
+  data$label = data$discontinue_flg_1_0
+  data$discontinue_flg_1_0 = NULL
+  
+  data$label = as.factor(data$label)
+  table(data$label)
+  
+  colnames_ = make_var_name(colnames(data))
+  colnames(data) = colnames_
+  
+  #----------------------------------------------------------------------------------------
+  #divide into training and testing -- code not used for now
+  #k = dismo::kfold(data, 5, by=data$label)
+  #k_train = which(k<=4)
+  #k_test = which(k==5)
+
+  #----------------------------------------------------------------------------------------
+  # Train on the entire data set and test on it
+  
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
+  trained_model <- train(lrn_xgb, dataset)
+  
+  write_xgb_model(trained_model, results_dir = results_dir_, dataset = dataset)
+  
+  #pred <- predict(trained_model, dataset_test)
+  pred <- predict(trained_model, dataset)
+    
+  #add the pat_id back
+  #pred$data$pat_id = combined$pat_id[k_test]
+  pred$data$pat_id = combined$pat_id
+  
+  dim(pred$data)
+  length(k_test)
+
+    
+  #get the order by prob.1
+  order = sort(pred$data$prob.1, index.return=TRUE, decreasing=TRUE)
+  
+  #checking
+  top_n = 20
+  pred$data$prob.1[ order$ix[1:top_n] ]
+  
+  #re-order it
+  pred_reordered = pred$data[order$ix,]
+  
+  top_20_patients <- left_join(pred_reordered[1:top_n,], combined_) #, by = "pat_id")
+  
+  # they are not aligned!!
+  top_20_patients$truth == top_20_patients$discontinue_flg
+
+  #transpose it
+  table_ = as.data.frame(t(top_20_patients))
+  table_$Column = rownames(table_)
+  table_$Description = Description[[table_$Column]]
+  table_$var_grouping = var_grouping[[table_$Column]]
+  table_$var_period = var_period[[table_$Column]]
+  
+  table_ = table_ %>% select('Column','Description', 'var_grouping','var_period', everything())
+  
+  write_csv(table_,
+    paste0(results_dir_,'top_20_pat_model2_combined_transposed_edited.csv'))
+
+  #----------------------------------------------------------------------------------------
+  # this part of the code does cross validation
+  dataset = makeClassifTask(id='full', data=data, target='label', positive=1)
+  lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+  
+  lrn_xgb$par.vals <- list(nrounds = 100, verbose = FALSE, objective = "binary:logistic")
+  
+  # make resample object
+  rdesc <- makeResampleDesc(method = "CV", iters = 5, stratify=TRUE)
+  
+  # resample
+  res <- mlr::resample(learner = lrn_xgb, task = dataset, resampling = rdesc)
+  
+  #analyse_res_cv_original(res, results_dir = results_dir_)
+  #analyse_res_cv(res, results_dir = results_dir_)
+  analyse_res_cv(res, results_dir = results_dir_, y_end=0.18)
+}
+
+```
+## Load the PR curves
+```{r}
+num_curve = 5
+fnames = vector('list',num_curve)
+for (i in 1:num_curve) {
+  fnames[[i]]  = paste0(results_dir,
+    'xgb_profile_',cname[i],
+    '/PRCurve_XGB_3fold_freq_100_bins.csv')
+}
+
+prec = vector('list',num_curve)
+for (i in 1:num_curve) {
+  prec[[i]] = read_csv(fnames[[i]])
+}
+
+prec_ = as.data.frame(lapply(prec, function (x) { x$prec }))
+colnames(prec_) = paste0('prec_',1:ncol(prec_))
+
+table_ =  cbind(prec[[1]]$rec_binned, prec_)
+colnames(table_) = c('Recall bin', cname[1:num_curve])
+
+write_csv(table_, paste0(results_dir,'PR_curves.csv'))
+```
+
+## get the res objects
+```{r}
+num_curve = 3
+fnames = vector('list',num_curve)
+for (i in 1:num_curve) {
+  fnames[[i]]  = paste0(results_dir,
+    'xgb_profile_',cname[i],
+    '/res_XGB_3fold.rds')
+}
+
+
+res_ = vector('list',num_curve)
+for (i in 1:num_curve) {
+  res_[[i]] = readRDS(fnames[[i]])
+}
+roc_obj = vector('list',num_curve)
+for (i in 1:num_curve) {
+  roc_obj[[i]] = pROC::roc(res_[[i]]$pred$data$truth, res_[[i]]$pred$data$prob.1, ci=TRUE)
+}
+#out_ = data.table::rbindlist(roc_obj)
+
+z = matrix(0, 3,3)
+for (i in 1:num_curve) {
+   z[i,]=as.numeric(roc_obj[[i]]$ci)
+}
+
+```
+
+# z
+          [,1]      [,2]      [,3]
+[1,] 0.5363467 0.5550605 0.5737744
+[2,] 0.7512432 0.7649524 0.7786615
+[3,] 0.8754563 0.8850807 0.8947051
+
+
+## plot the score distribution -- now this is automated
+
+```{r}
+i=3
+res = res_[[i]]
+y_end = c(0.34,0.35,0.2)
+eer_ = calculate_eer_thrd(res$pred$data$logit, res$pred$data$truth)
+
+#res_[[2]]$pred$data$logit
+
+gg = ggplot(res$pred$data) + aes(logit, group=truth, fill=truth) + 
+    geom_density(alpha = .2) + xlab( 'logit scores' ) +
+    scale_fill_discrete(name='discon.')
+gg + geom_segment(aes(x=eer_$thrd,y=0, xend=eer_$thrd, yend=y_end[i]))
+
+neg = res$pred$data$logit [ res$pred$data$truth==0 ]
+pos = res$pred$data$logit [ res$pred$data$truth==1 ]
+
+#checking
+length(pos)
+length(neg)
+sum(res$pred$data$truth==1)
+sum(res$pred$data$truth==0)
+
+
+true_pos = sum(pos > eer_$thrd)
+true_neg = sum(neg <= eer_$thrd)
+false_pos = sum(neg > eer_$thrd) #false alarm
+false_neg = sum(pos <= eer_$thrd) #false reject
+
+mat = matrix(0, 2,2)
+mat[1,1] = true_pos
+mat[2,2] = true_neg
+mat[1,2] = false_pos
+mat[2,1] = false_neg
+
+mat_ = as.data.frame(mat)
+rownames(mat_) = c('Predicted positive','Predicted negative')
+colnames(mat_) = c('Y=1','Y=0')
+
+mat_$rowname = rownames(mat_)
+mat_ = mat_ %>% select(one_of('rowname'),everything())
+rownames(mat_)= NULL
+
+precision = true_pos /sum(mat_[1,]) #or ppv
+recall = true_pos / sum(mat_[,1])
+
+mat_ = rbind(mat_,
+  tibble(rowname='Precision', `Y=1`= precision, `Y=0`=NA),
+  tibble(rowname='Recall', `Y=1`= recall, `Y=0`=NA))
+
+write_csv(mat_,paste0(results_dir,'confusion_matrix.csv'))
+  
+mat_
+
+sum(mat_[,1])
+
+sum(mat_[,2])
+```
+
