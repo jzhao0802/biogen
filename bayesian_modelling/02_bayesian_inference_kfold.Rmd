@@ -107,8 +107,11 @@ kf = combined$partition
 model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
 vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
 
+```
+## get the logit scores
+```{r}
 model_indi = vector('list', 3)
-
+logits = vector('list', 3)
 for (m in 2:3) {
   model_indi[[m]] = vector('list', length(vlist[[m]]))
   
@@ -117,30 +120,118 @@ for (m in 2:3) {
   mat_prior = inference_bayes(model_prior[[m]], x, 
       legend_label='Prob.apriori')
 
+  logits[[m]] = matrix(0, nrow(combined), length(vlist[[m]]))
   for (i in 1:length(vlist[[m]])) {
     
     combined_ = combined %>% 
       dplyr::select(one_of(c(vlist[[m]][i],'discontinue_flg')))
     colnames(combined_) = c('x','label')
     
+    column_ = rep(0, nrow(combined))
     for (k in 1:5) {
-      mat__ = remove_na_table(combined_[kf!=k,])  
+      mat__ = remove_na_table(combined_[kf!=k,])
     
-      # training -- here, we also include the prior model in case that there is less than two data points for training
-    model_indi_ = train_bayes(mat__$x, mat__$label, model_prior[[m]])
+      # training (with prior model included to add robustness)
+      model_indi_ = train_bayes(mat__$x, mat__$label, model_prior[[m]])
   
-    # adaptation
-    model_indi[[m]][[i]] = adapt_bayes(model_prior[[m]], 
-      model_indi_, relevance_factor=100,x )
+      # adaptation
+      model_indi[[m]][[i]] = adapt_bayes(model_prior[[m]], 
+        model_indi_, relevance_factor=100,x )
     
-    # make inference on the test set
-    mat__ = remove_na_table(combined_[kf==k,])
-    
-    mat_indi_orig = inference_bayes(model_indi_, x, 
-      legend_label='Prob.Original')
-    mat_indi_adapted = inference_bayes(model_indi[[m]][[i]], x,
-      legend_label='Prob.Adapted')
-    
-  }
-}
+      # make inference on the test set
+      mat__ = combined_[kf==k,]
+      logit_ = predict_bayes_logit(model_indi[[m]][[i]], mat__$x)
+      # mat_indi_adapted = inference_bayes(model_indi[[m]][[i]], mat__$x,
+      #   legend_label='Prob.Adapted')
+      # mat_indi_adapted = mat_indi_adapted %>% filter(type == 'Prob.Adapted')
+      # mat_indi_adapted$y
+      column_[kf==k] = logit_
+    }
+    logits[[m]][,i] = column_
+  }# for all i
+} # for all m
 ```
+
+## make tha mat matrix from logits data
+```{r}
+# how many nonzeros can we expect per column?
+res_logit = as.data.frame(apply(logits[[2]], 2, function(x) {sum(!near(x, 0))}))
+colnames(res_logit)='count'
+res_data = as.data.frame(apply(
+  combined %>% dplyr::select(one_of(vlist[[m]])), 
+  2, function(x) {(sum(!is.na(x)))}))
+colnames(res_data)='count'
+res_logit
+res_data
+
+mat = as.data.frame(cbind(logits[[2]], logits[[3]]))
+colnames(mat) = c(vlist[[2]], vlist[[3]])
+colnames(mat) = str_replace(colnames(mat),'_diff','_logit')
+
+
+# truncate extreme values
+mat = as.data.frame( apply(mat, 2, function(x){ ifelse(x < -700, -8, x) }))
+
+min(mat)
+
+
+```
+## train glm on all the data set to get the weights
+
+```{r}
+#training
+target_tab = as.numeric(table(combined$discontinue_flg))
+iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1] 
+
+#checking
+sum(iw[combined$discontinue_flg==1])
+sum(iw[combined$discontinue_flg==0])
+
+glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+  family="binomial",weights = iw)
+
+plot(glm_, xvar = "dev", label = TRUE)
+
+glm_cv = cv.glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+  family="binomial",weights = iw, type.measure = "deviance")
+
+plot(glm_cv)
+glm_cv$lambda.min
+glm_cv$lambda.1se
+
+out_ = cbind( coef(glm_cv, s = "lambda.min"),
+  coef(glm_cv, s = "lambda.1se"))
+colnames(out_) = c('lambda.min','lambda.1se')
+
+prob_lr = predict(glm_, as.matrix(mat), type='response', 
+  s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+
+
+# select those rows that are not zeros every where
+rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
+selected = !near(rows_, 0)
+sum(selected) # only 250 samples are affected
+
+res = tibble(scores = prob_lr[selected,3], 
+  truth = as.factor(combined$discontinue_flg[selected]))
+
+table(res$truth)
+
+eer_ = calculate_eer(res$scores, res$truth)
+
+ggplot(res) + aes(scores, group=truth, fill=truth) + 
+    geom_density(alpha = .2) + xlab( 'logit scores' ) 
+```
+## optimal values found on the logit score matrix after capping the negative class to -8
+
+9 x 2 sparse Matrix of class "dgCMatrix"
+                       lambda.min lambda.1se
+(Intercept)            0.01220326 0.01452452
+post_symps_fst8_logit  1.05357041 0.47479962
+post_symps_fst10_logit 0.91135590 0.42657358
+post_symps_fst12_logit 1.16199558 0.53675314
+post_symps_fst13_logit 0.37600250 0.22978783
+post_symps_fst14_logit 0.55688846 0.26669930
+post_symps_fst15_logit 0.85290095 0.32513605
+post_symps_fst16_logit 0.93658841 0.35686286
+post_dme_fst_logit     0.72142294 0.43163626
