@@ -136,6 +136,41 @@ inference_bayes <- function(model_bayes, x, legend_label = 'Prob-Bayes') {
               )
 }
 
+remove_na_features <- function(fea_) {
+  selected = !is.na(fea_)
+  table_ = tibble(
+  x = fea_[selected], label = combined$discontinue_flg[selected])
+  return(table_)
+}
+
+adapt_bayes <- function(model_prior, model_indi, relevance_factor=100, x) {
+  if (missing(x)) {
+    x = model_prior$x_space
+  }
+  
+  alpha0 = model_indi$N0 / (model_indi$N0 + relevance_factor)
+  alpha1 = model_indi$N1 / (model_indi$N1 + relevance_factor)
+  
+  print( sprintf('relevance factor: %d', relevance_factor) )
+  print( sprintf('alpha0: %1.3f, N0: %d', alpha0, model_indi$N0 ) )
+  print( sprintf('alpha1: %1.3f, N1: %d', alpha1, model_indi$N1 ) )
+  
+  #compute the new likelihood function
+  llh0_hat = model_indi$llh0(x) * alpha0 + model_prior$llh0(x) * (1-alpha0)
+  llh0_fun =approxfun(x, llh0_hat, yleft=0, yright=0)
+  
+  llh1_hat = model_indi$llh1(x) * alpha1 + model_prior$llh1(x) * (1-alpha1)
+  llh1_fun =approxfun(x, llh1_hat, yleft=0, yright=0)
+  return(list(llh0 = llh0_fun, llh1=llh1_fun, 
+    N0 = model_indi$N0, N1 = model_indi$N1))
+}
+
+```
+
+## test it on a particular feature set
+
+```{r}
+
 model = train_bayes(combined$post_ae_fst1_diff, combined$discontinue_flg)
 x = get_feature_space(combined$post_ae_fst1_diff)
 prob_ = predict_bayes(model, x)
@@ -239,42 +274,11 @@ for (m in 2:3) {
   print(gg)  
   
 }
-
-```
-## more helper functions
-
-```{r}
-remove_na_features <- function(fea_) {
-  selected = !is.na(fea_)
-  table_ = tibble(
-  x = fea_[selected], label = combined$discontinue_flg[selected])
-  return(table_)
-}
-
-adapt_bayes <- function(model_prior, model_indi, relevance_factor=100, x) {
-  if (missing(x)) {
-    x = model_prior$x_space
-  }
-  
-  alpha0 = model_indi$N0 / (model_indi$N0 + relevance_factor)
-  alpha1 = model_indi$N1 / (model_indi$N1 + relevance_factor)
-  
-  print( sprintf('relevance factor: %d', relevance_factor) )
-  print( sprintf('alpha0: %1.3f, N0: %d', alpha0, model_indi$N0 ) )
-  print( sprintf('alpha1: %1.3f, N1: %d', alpha1, model_indi$N1 ) )
-  
-  #compute the new likelihood function
-  llh0_hat = model_indi$llh0(x) * alpha0 + model_prior$llh0(x) * (1-alpha0)
-  llh0_fun =approxfun(x, llh0_hat, yleft=0, yright=0)
-  
-  llh1_hat = model_indi$llh1(x) * alpha1 + model_prior$llh1(x) * (1-alpha1)
-  llh1_fun =approxfun(x, llh1_hat, yleft=0, yright=0)
-  return(list(llh0 = llh0_fun, llh1=llh1_fun, 
-    N0 = model_indi$N0, N1 = model_indi$N1))
-}
+saveRDS(model_prior,'D:/Results/modelling_09_bayesian/model/model_prior.rds')
+saveRDS(vlist,'D:/Results/modelling_09_bayesian/model/vlist.rds')
 ```
 
-##  additional funtion
+##  Fit the individual left out variables 
 ```{r}
 model_indi = vector('list', 3)
 
@@ -327,9 +331,10 @@ for (m in 2:3) {
 }
 
 ```
-
+## kfold
 
 ```{r}
+
 
 
 ```

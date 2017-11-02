@@ -1,0 +1,319 @@
+---
+title: "Modelling with the agreed universe of features"
+author: "Norman Poh"
+date: "26 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+source("L:/Lib/cal_formatted_confusion_matrix.R")
+
+```
+
+```{r}
+
+results_dir = "D:/Results/modelling_08_copay/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+
+old_config = read_csv("D:/Data/Processed/archive/combined_date_complied_rectified_num_config.csv")
+
+```
+
+## Get the map up
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+```
+
+## Adhoc query 2
+```{r}
+data__ = rbind(
+  tibble(var = setdiff(config$Column[config$v1], old_config$Column[old_config$v1]), 
+         model = 'm1'),
+  tibble(var = setdiff(config$Column[config$v2], old_config$Column[old_config$v2]), 
+         model = 'm2'),
+  tibble(var = setdiff(config$Column[config$v3], old_config$Column[old_config$v3]), 
+         model = 'm3')
+)
+
+write_csv(data__, 'D:/Results/modelling_08_copay/variable_differences__10_answering_adhoc_queries.csv')
+```
+
+## do this in bash
+/d/Results/modelling_08_copay
+head -10 xgb_profile_v?/confusion_matrix.csv  > confusion_matrix.csv
+
+
+## Adhoc query 3
+```{r}
+combined$post_relapse_60 = combined$post_relapse_fst_diff <= 60
+out_ = table(combined$post_relapse_60, combined$discontinue_flg)
+
+sum(!is.na(combined$post_relapse_fst_diff))
+stat = as.table(out_)
+write_csv(as.data.frame(stat), 'D:/Results/modelling_08_copay/relapse_60.csv')
+```
+## output
+          0   1
+  FALSE 330   9
+  TRUE  236 103
+  
+```{r}
+combined = combined %>% mutate(relapse_dison = disc_dt_diff - post_relapse_fst_diff)
+combined$discontinue_flg = as.factor(combined$discontinue_flg)
+z=combined %>% filter(!is.na(relapse_dison)) %>% select(one_of('relapse_dison', 'post_relapse_60','discontinue_flg'))
+
+
+stat = as.data.frame(stat)
+colnames(stat)=c('Relapse','Discon.','Count')
+
+title_ = 
+  sprintf("#relapsed within 60 days (TRUE) = %d, # (FALSE) = %d, # Total (discon.) = %d",
+  stat$Count[stat$Relapse==TRUE & stat$Discon.==1], 
+  stat$Count[stat$Relapse==FALSE & stat$Discon.==1], 
+  sum(stat$Count[stat$Discon.==1]))
+                                                                  
+gg = ggplot(z) + aes(relapse_dison, group=post_relapse_60, fill=post_relapse_60) + 
+  geom_density(alpha = .2) + 
+  xlab( 'Number of days between first relapse and recorded discontinuation date' ) +
+  scale_fill_discrete(name='relapse within 60') +
+  scale_x_continuous(breaks = round(seq(min(z$relapse_dison), max(z$relapse_dison), by = 7),1)) +
+  ggtitle(title_)
+    
+print(gg)
+fname = paste0(results_dir, "discon_minus_relapse_diff_cond.png")
+ggsave(fname, plot = last_plot())
+
+z %>% filter(post_relapse_60==FALSE)
+data_ = z %>% filter(post_relapse_60==FALSE) %>% select('relapse_dison')
+```
+##
+> data_
+  relapse_dison
+1            20
+2            24
+3            10
+4            26
+5            10
+6             6
+7             9
+8            25
+9            22
+
+##
+```{r}
+data_ = z %>% filter(post_relapse_60==TRUE) %>% select('relapse_dison')
+sum(data_$relapse_dison<=26) / length(data_$relapse_dison)
+sum(data_$relapse_dison<=26)
+```
+## 4th ad hoc query
+```{r}
+#checking
+combined[,c('pre_relapse_fst_diff', 'pre_relapse_lst_diff')]
+combined$pre_relapse_lst_diff-  combined$pre_relapse_fst_diff
+
+combined$pre_relapse_flag = FALSE
+selected = combined$pre_relapse_lst_diff <=0 | combined$pre_relapse_fst_diff <=0
+combined$pre_relapse_flag[selected ]= TRUE
+
+combined$post_relapse_flag = FALSE
+selected = combined$post_relapse_fst_diff >=0 | combined$post_relapse_lst_diff >=0
+combined$post_relapse_flag[selected ]= TRUE
+
+
+calculate_prob_Y1 <- function(table_, more_outcome_is_better=FALSE) {
+  # Y is a factor with zeros and ones
+  # X is binary
+  colnames_ = colnames(table_)
+  colnames(table_) = c('X','Y','Count')
+  
+  #table_$X = as.logical(table_$X)
+  #convert factors to binary
+  #table_$Y = as.logical(as.numeric(as.character(table_$Y)))
+  
+  tot = sum(table_$Count)
+  Prior_Y = c( sum(table_$Count [table_$Y==0]), sum(table_$Count [table_$Y==1]) ) / tot
+  Prior_Y0 = Prior_Y[1]
+  Prior_Y1 = Prior_Y[2]
+  
+  print('Prior Y : (0, 1)')
+  print(Prior_Y)
+  
+  Prior_X = 
+    c( sum(table_$Count [table_$X==FALSE]), sum(table_$Count [table_$X==TRUE]) ) / tot
+  
+  print('Prior X : (FALSE, TRUE)')
+  print(Prior_X)
+  
+  tot_Y0 =  sum(table_$Count [table_$Y==0])
+  
+  tot_Y1 =  sum(table_$Count [table_$Y==1])
+  
+  #print('tot_Y')
+  #print(c(tot_Y0,tot_Y1))
+  
+  #P(X|Y=1)
+  Cond_Prob_X_Y1 = c( table_$Count [table_$X==FALSE & table_$Y==1], 
+                      table_$Count [table_$X==TRUE & table_$Y==1]) / tot_Y1
+  Cond_Prob_X_Y0 = c( table_$Count [table_$X==FALSE & table_$Y==0], 
+                      table_$Count [table_$X==TRUE & table_$Y==0]) / tot_Y0
+  
+  print('P(X|Y=1) : X=(FALSE, TRUE)')
+  print(Cond_Prob_X_Y1)
+  print('P(X|Y=0) : X=(FALSE, TRUE)')
+  print(Cond_Prob_X_Y0)
+  
+  Posterior_Y1_given_X = numeric(2)
+  #X=FALSE , # P(x=0|Y=1)P(Y=1)
+  Posterior_Y1_given_X[1] = Cond_Prob_X_Y1[1] * Prior_Y1/ 
+    Prior_X[1]
+  
+  #X=TRUE
+  Posterior_Y1_given_X[2] = Cond_Prob_X_Y1[2] * Prior_Y1/ # P(x=0|Y=1)P(Y=1)
+    Prior_X[2]
+    #(Cond_Prob_X_Y0[2] * Prior_Y1 + Cond_Prob_X_Y0[2] * Prior_Y0)
+
+  print('P(Y=1|X) : X=(FALSE, TRUE)')
+  print(Posterior_Y1_given_X)
+  
+  if(more_outcome_is_better) {
+    if (Posterior_Y1_given_X[2] > Prior_Y1) {
+      txt_ = sprintf('Having %s=TRUE, increases the probability of a positve outcome', colnames_[1])
+    } else {
+      txt_ = sprintf('Having %s=FALSE, increases the probability of a positve outcome', colnames_[1])
+    }
+  } else {
+    if (Posterior_Y1_given_X[2] < Prior_Y1) {
+      txt_ = sprintf('Having %s=TRUE, decreases the probability of a positve outcome', colnames_[1])
+    } else {
+      txt_ = sprintf('Having %s=FALSE, decreases the probability of a positve outcome', colnames_[1])
+    }
+  }
+  print(txt_)
+  
+  return(list(Posterior_Y1_given_X=Posterior_Y1_given_X, Prior_Y1 = Prior_Y1))  
+}
+```
+
+```{r}
+stat_ = as.data.frame(table(as.logical(combined$post_relapse_flag),
+  combined$discontinue_flg))
+colnames(stat_) = c('post_relapse_flg','Discon.','Count')
+print(stat_)
+ProbY = calculate_prob_Y1(stat_)
+
+stat_ = as.data.frame(table(as.logical(combined$pre_relapse_flag),
+  combined$discontinue_flg))
+colnames(stat_) = c('pre_relapse_flg','Discon.','Count')
+ProbY = calculate_prob_Y1(stat_)
+
+stat_ = as.data.frame(table(as.logical(combined$post_gaba_flg), 
+  combined$discontinue_flg))
+colnames(stat_) = c('post_gaba_flg','Discon.','Count')
+ProbY = calculate_prob_Y1(stat_)
+
+```
+
+
+```{r}
+calculate_prob_Y1_discreteX <- function(table_) {
+  # Y is a factor with zeros and ones
+  # X is binary
+  colnames(table_) = c('X','Y','Count')
+  
+  #table_$X = as.logical(table_$X)
+  #convert factors to binary
+  #table_$Y = as.logical(as.numeric(as.character(table_$Y)))
+  
+  tot = sum(table_$Count)
+  Prior_Y = c( sum(table_$Count [table_$Y==0]), sum(table_$Count [table_$Y==1]) ) / tot
+  Prior_Y0 = Prior_Y[1]
+  Prior_Y1 = Prior_Y[2]
+  
+  print('Prior Y : (0, 1)')
+  print(Prior_Y)
+  
+  Prior_X = 
+    c( sum(table_$Count [table_$X==FALSE]), sum(table_$Count [table_$X==TRUE]) ) / tot
+  
+  print('Prior X : (FALSE, TRUE)')
+  print(Prior_X)
+  
+  tot_Y0 =  sum(table_$Count [table_$Y==0])
+  
+  tot_Y1 =  sum(table_$Count [table_$Y==1])
+  
+  #print('tot_Y')
+  #print(c(tot_Y0,tot_Y1))
+  
+  #P(X|Y=1)
+  Cond_Prob_X_Y1 = c( table_$Count [table_$X==FALSE & table_$Y==1], 
+                      table_$Count [table_$X==TRUE & table_$Y==1]) / tot_Y1
+  Cond_Prob_X_Y0 = c( table_$Count [table_$X==FALSE & table_$Y==0], 
+                      table_$Count [table_$X==TRUE & table_$Y==0]) / tot_Y0
+  
+  print('P(X|Y=1) : X=(FALSE, TRUE)')
+  print(Cond_Prob_X_Y1)
+  print('P(X|Y=0) : X=(FALSE, TRUE)')
+  print(Cond_Prob_X_Y0)
+  
+  Posterior_Y1_given_X = numeric(2)
+  #X=FALSE , # P(x=0|Y=1)P(Y=1)
+  Posterior_Y1_given_X[1] = Cond_Prob_X_Y1[1] * Prior_Y1/ 
+    Prior_X[1]
+  
+  #X=TRUE
+  Posterior_Y1_given_X[2] = Cond_Prob_X_Y1[2] * Prior_Y1/ # P(x=0|Y=1)P(Y=1)
+    Prior_X[2]
+    #(Cond_Prob_X_Y0[2] * Prior_Y1 + Cond_Prob_X_Y0[2] * Prior_Y0)
+
+  print('P(Y=1|X) : X=(FALSE, TRUE)')
+  print(Posterior_Y1_given_X)
+  
+  return(list(Posterior_Y1_given_X=Posterior_Y1_given_X, Prior_Y1 = Prior_Y1))  
+}
+
+
+```

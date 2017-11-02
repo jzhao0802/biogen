@@ -1,0 +1,146 @@
+---
+title: "Bayesian inference with cross validation"
+author: "Norman Poh"
+date: "2 November 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+---
+title: "Bayesian inference"
+author: "Norman Poh"
+date: "20 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+#rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+library(glmnet)
+library(dismo)
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+
+```
+
+```{r}
+
+results_dir = "D:/Results/modelling_09_bayesian/"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+
+```
+
+## Get the map up
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+
+remove_na_table <- function(table_) {
+  selected = !is.na(table_$x)
+  return(table_[selected,])
+}
+
+```
+
+## 
+
+```{r}
+if (TRUE) {
+  combined$partition =
+    readRDS('D:/Results/modelling_09_bayesian/model/partition.rds')
+} else { # run the following for the first time only
+  combined$partition = kfold(1:nrow(combined), k=5, by = combined$discontinue_flg)
+  saveRDS(combined$partition,
+    'D:/Results/modelling_09_bayesian/model/partition.rds')
+}
+
+kf = combined$partition
+
+model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
+vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
+
+model_indi = vector('list', 3)
+
+for (m in 2:3) {
+  model_indi[[m]] = vector('list', length(vlist[[m]]))
+  
+  x = model_prior[[m]]$x_space
+  
+  mat_prior = inference_bayes(model_prior[[m]], x, 
+      legend_label='Prob.apriori')
+
+  for (i in 1:length(vlist[[m]])) {
+    
+    combined_ = combined %>% 
+      dplyr::select(one_of(c(vlist[[m]][i],'discontinue_flg')))
+    colnames(combined_) = c('x','label')
+    
+    for (k in 1:5) {
+      mat__ = remove_na_table(combined_[kf!=k,])  
+    
+      # training -- here, we also include the prior model in case that there is less than two data points for training
+    model_indi_ = train_bayes(mat__$x, mat__$label, model_prior[[m]])
+  
+    # adaptation
+    model_indi[[m]][[i]] = adapt_bayes(model_prior[[m]], 
+      model_indi_, relevance_factor=100,x )
+    
+    # make inference on the test set
+    mat__ = remove_na_table(combined_[kf==k,])
+    
+    mat_indi_orig = inference_bayes(model_indi_, x, 
+      legend_label='Prob.Original')
+    mat_indi_adapted = inference_bayes(model_indi[[m]][[i]], x,
+      legend_label='Prob.Adapted')
+    
+  }
+}
+```
