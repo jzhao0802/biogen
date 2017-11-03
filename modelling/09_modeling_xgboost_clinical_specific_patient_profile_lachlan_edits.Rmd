@@ -64,7 +64,7 @@ for(i in 1:length(source_files)) {
 
 ```{r}
 # what is this for?
-results_dir = "D:/Results/modelling_08_copay_test/"
+results_dir = "F:/Projects/Biogen_Tecfidera/Results/modelling_08_copay_test/"
 mkdirs(results_dir)
 
 # LM: define data dir:
@@ -206,21 +206,21 @@ for (i in 1:length(cname)) {
   var_stat
   sum(var_stat)
   
-  # LM: I believe extreme value capping isn't needed for XGBoost.
-  # # extreme value
-  # if (length(selected_num)>0) {
-  #   write_csv(config_[c(key,selected_num),], 
-  #     paste0(results_dir_, 'modelling_var_config_num.csv'))
-  #   combined_num = extreme_values(
-  #       combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
-  #       var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
-  #       pth = 0.99,
-  #       output_dir = results_dir_)
-  #   combined_num = combined_num$data %>%   select( - one_of('pat_id'))
-  # } else {
-  #   combined_num=combined_ %>% select( one_of('dodo'))
-  # }
-  
+  # extreme value
+  if (length(selected_num)>0) {
+    write_csv(config_[c(key,selected_num),],
+      paste0(results_dir_, 'modelling_var_config_num.csv'))
+    combined_num = extreme_values(
+        combined_  %>% select( one_of(config_$Column[c(key,selected_num)])),
+        var_config = paste0(results_dir_, 'modelling_var_config_num.csv'),
+        pth = 0.99,
+        output_dir = results_dir_)
+    combined_num = combined_num$data %>%   select( - one_of('pat_id'))
+  } else {
+    # LM: what is dodo?
+    combined_num=combined_ %>% select( one_of('dodo'))
+  }
+
   
   # cat variable
   if (length(selected_cat)>0) {
@@ -230,7 +230,7 @@ for (i in 1:length(cname)) {
     combined_cat = dummy_vars(combined_ %>% 
       select( one_of(config_$Column[c(key,selected_cat)])),
       var_config = paste0(results_dir_, 'modelling_var_config_cat.csv'),
-      output_dir = NULL)
+      output_csv = FALSE)
       
     combined_cat = combined_cat$dummyfied %>%   select( - one_of('pat_id'))
   } else {
