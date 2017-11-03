@@ -164,6 +164,7 @@ colnames(res_data)='count'
 res_logit
 res_data
 
+#put the logit scores together to form the matrix mat
 mat = as.data.frame(cbind(logits[[2]], logits[[3]]))
 colnames(mat) = c(vlist[[2]], vlist[[3]])
 colnames(mat) = str_replace(colnames(mat),'_diff','_logit')
@@ -212,7 +213,11 @@ rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
 selected = !near(rows_, 0)
 sum(selected) # only 250 samples are affected
 
-res = tibble(scores = prob_lr[selected,3], 
+logit_transform <- function(x) {
+  return(log(x) - log(1-x))
+}
+
+res = tibble(scores = logit_transform(prob_lr[selected,3]), 
   truth = as.factor(combined$discontinue_flg[selected]))
 
 table(res$truth)
@@ -224,14 +229,26 @@ ggplot(res) + aes(scores, group=truth, fill=truth) +
 ```
 ## optimal values found on the logit score matrix after capping the negative class to -8
 
-9 x 2 sparse Matrix of class "dgCMatrix"
                        lambda.min lambda.1se
-(Intercept)            0.01220326 0.01452452
-post_symps_fst8_logit  1.05357041 0.47479962
-post_symps_fst10_logit 0.91135590 0.42657358
-post_symps_fst12_logit 1.16199558 0.53675314
-post_symps_fst13_logit 0.37600250 0.22978783
-post_symps_fst14_logit 0.55688846 0.26669930
-post_symps_fst15_logit 0.85290095 0.32513605
-post_symps_fst16_logit 0.93658841 0.35686286
-post_dme_fst_logit     0.72142294 0.43163626
+(Intercept)            0.01255868 0.01428597
+post_symps_fst8_logit  0.97610060 0.40553509
+post_symps_fst10_logit 0.86789346 0.33189555
+post_symps_fst12_logit 1.10787735 0.43117158
+post_symps_fst13_logit 0.36262604 0.19240150
+post_symps_fst14_logit 0.52062930 0.21421914
+post_symps_fst15_logit 0.76898446 0.26473180
+post_symps_fst16_logit 0.82319008 0.30008792
+post_dme_fst_logit     0.68857199 0.38052039
+
+
+## Get the PR curve based on the 250 patients affected
+```{r}
+pred <- ROCR::prediction( res$scores , res$truth)
+perf <- ROCR::performance(pred,"ppv","rec")
+cutoffs <- data.frame(cut=perf@alpha.values[[1]], recall=perf@x.values[[1]], 
+                      precision=perf@y.values[[1]])
+
+ggplot(cutoffs) + aes(x=recall, y=precision, xend=1, yend=1) + 
+    geom_smooth(alpha = .2) + geom_point()
+
+```
