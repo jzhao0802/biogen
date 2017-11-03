@@ -1,0 +1,287 @@
+---
+title: "Logistic regression kfold"
+author: "Norman Poh"
+date: "3 November 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Local set up
+
+1. First, mount your data folder in Windows command prompt:
+subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+2. set up local data drive
+subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
+
+```{r}
+#rm(list = ls())
+setwd("L:/modelling")
+library(palab)
+library(palabmod)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+library(lubridate)
+library(tictoc)
+library(hashmap)
+library(xgboost)
+library(R.utils)
+library(ROCR)
+library(pROC) # to calculate auc
+library(glmnet)
+library(dismo)
+source("L:/Lib/analyse_res_cv.R")
+source("L:/Lib/calculate_eer.R")
+source("L:/Lib/config_with_colnames.R")
+source("L:/Lib/create_date_diffs.R")
+source("L:/Lib/cut_linux.R")
+source("L:/Lib/factor2numeric.R")
+source("L:/Lib/make_negative.R")
+source("L:/Lib/make_positive.R")
+source("L:/Lib/make_var_name.R")
+source("L:/Lib/mystat.R")
+source("L:/Lib/plot_cond_density.R")
+source("L:/Lib/remove_inf.R")
+source("L:/Lib/remove_na.R")
+source("L:/Lib/write_xgb_model.R")
+
+```
+
+```{r}
+
+results_dir = "D:/Results/modelling_09_bayesian/logistic_model"
+mkdirs(results_dir)
+```
+
+## Load the original variables
+
+```{r}
+combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
+config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+
+```
+
+## Get the map up plus additional functions
+
+```{r}
+Description = hashmap(config$Column, config$Description)
+var_grouping = hashmap(config$Column, config$var_grouping)
+var_period = hashmap(config$Column, config$var_period)
+
+remove_na_table <- function(table_) {
+  selected = !is.na(table_$x)
+  return(table_[selected,])
+}
+
+logistic_inference <- function(glm_cv, x) {
+  prob_lr = predict(glm_cv, newx=cbind(x,1), type='response', 
+    s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+ 
+  mat__ = rbind(#inference_bayes(model_prior[[m]], x),
+                tibble(x=x,y=prob_lr[,2], type='LR(lambda.min)'),
+                tibble(x=x,y=prob_lr[,3], type='LR(lambda.1se)'))
+  return(mat__)
+}
+
+logit_transform <-function(x) {
+  #expect x to be probability
+  x[is.na(x)] = 0.5 # so replace NA with non-informative prior,i.e., 0.5
+  return(log(x) - log(1-x))
+}
+
+```
+
+## 
+
+```{r}
+if (TRUE) {
+  combined$partition =
+    readRDS('D:/Results/modelling_09_bayesian/model/partition.rds')
+} else { # run the following for the first time only
+  combined$partition = kfold(1:nrow(combined), k=5, by = combined$discontinue_flg)
+  saveRDS(combined$partition,
+    'D:/Results/modelling_09_bayesian/model/partition.rds')
+}
+
+kf = combined$partition
+
+model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
+vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
+model_prior_data = readRDS('D:/Results/modelling_09_bayesian/model/model_prior_data.rds')
+model_prior_lr = readRDS('D:/Results/modelling_09_bayesian/model/model_prior_lr.rds')
+```
+
+## get the logit scores using Logistic regression inference
+```{r}
+model_indi_lr = vector('list', 3)
+logits_lr = vector('list', 3)
+for (m in 2:3) {
+  model_indi_lr[[m]] = vector('list', length(vlist[[m]]))
+  
+  x = model_prior[[m]]$x_space
+  
+  mat_prior_bayes = inference_bayes(model_prior[[m]], x)
+  mat_prior_lr = logistic_inference(model_prior_lr[[m]], x)
+
+  logits_lr[[m]] = matrix(0, nrow(combined), length(vlist[[m]]))
+  for (i in 1:length(vlist[[m]])) {
+    
+    combined_ = combined %>% 
+      dplyr::select(one_of(c(vlist[[m]][i],'discontinue_flg')))
+    colnames(combined_) = c('x','label')
+    
+    column_ = rep(0, nrow(combined))
+    for (k in 1:5) {
+      mat__ = remove_na_table(combined_[kf!=k,])
+      
+      mat__$label [mat__$label==1] = 2
+      mat = rbind(mat__, 
+        model_prior_data[[m]] %>% dplyr::select(one_of(c('x','label'))))
+      
+      # training the lr with the augmented data
+      target_tab = as.numeric(table(mat$label))
+      
+      iw = rep(0, length(mat__$label))
+      for(j in 1:3) {
+        iw[ mat$label==(j-1) ]  = 1/target_tab[j]
+      }
+      #checking
+      sum(iw[mat$label==2])
+      sum(iw[mat$label==1])
+      sum(iw[mat$label==0])
+
+      mat$label [mat$label==2] = 1 #put the label back
+      
+      glm_cv = cv.glmnet(x=cbind(mat$x, 1), 
+        y=as.factor(mat$label), 
+        family="binomial",weights = iw, type.measure = "deviance")
+      
+      # just checking
+      # prob_lr = predict(glm_cv, newx=cbind(x,1), type='response', 
+      #     s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+      # mat__ = rbind(inference_bayes(model_prior[[m]], x),
+      #           tibble(x=x_,y=prob_lr[,2], type='LR(lambda.min)'),
+      #           tibble(x=x_,y=prob_lr[,3], type='LR(lambda.1se)'))
+      # 
+      # gg = ggplot(data=mat__, aes(x=x, y=y, group = type, colour = type)) +
+      #   geom_line() +
+      #   geom_point( size=2, shape=21)  + #, fill="white")
+      #   xlab(Description[['general']]) +
+      #   ylab('Likelihood x 20, Probability')
+      # print(gg)  
+      
+      # make inference on the test set
+      mat__ = combined_[kf==k,]
+      
+      prob_lr = predict(glm_cv, newx=cbind(mat__$x,1), type='response', 
+        s=c(glm_cv$lambda.1se)) 
+      logit_ = logit_transform(prob_lr)
+
+      #checking
+      # mat__$x[!is.na(mat__$x)]
+      # logit_[!near(logit_,0)]
+      # prob_lr[!is.na(prob_lr)]
+      
+      column_[kf==k] = logit_
+    }
+    logits_lr[[m]][,i] = column_
+  }# for all i
+} # for all m
+```
+
+## make the mat matrix from logits data
+```{r}
+# how many nonzeros can we expect per column?
+res_logit = as.data.frame(apply(logits_lr[[2]], 2, function(x) {sum(!near(x, 0))}))
+colnames(res_logit)='count'
+res_data = as.data.frame(apply(
+  combined %>% dplyr::select(one_of(vlist[[m]])), 
+  2, function(x) {(sum(!is.na(x)))}))
+colnames(res_data)='count'
+
+print(res_logit)
+print(res_data)
+
+#put the logit scores together to form the matrix mat
+mat = as.data.frame(cbind(logits_lr[[2]], logits_lr[[3]]))
+colnames(mat) = c(vlist[[2]], vlist[[3]])
+colnames(mat) = str_replace(colnames(mat),'_diff','_logit')
+
+
+# truncate extreme values -- no more extreme value now :) unlike Bayes inference
+mat = as.data.frame( apply(mat, 2, function(x){ ifelse(x < -700, -8, x) }))
+
+min(mat)
+max(mat)
+
+saveRDS(mat, 'D:/Results/modelling_09_bayesian/mat__logit_scores_logistic.rds')
+
+```
+
+## train glm on all the data set to get the weights
+
+```{r}
+
+mat = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_logistic.rds')
+#training
+target_tab = as.numeric(table(combined$discontinue_flg))
+iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1] 
+
+#checking
+sum(iw[combined$discontinue_flg==1])
+sum(iw[combined$discontinue_flg==0])
+
+glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+  family="binomial",weights = iw)
+
+plot(glm_, xvar = "dev", label = TRUE)
+
+glm_cv = cv.glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+  family="binomial",weights = iw, type.measure = "deviance")
+
+plot(glm_cv)
+glm_cv$lambda.min
+glm_cv$lambda.1se
+
+out_ = cbind( coef(glm_cv, s = "lambda.min"),
+  coef(glm_cv, s = "lambda.1se"))
+colnames(out_) = c('lambda.min','lambda.1se')
+
+prob_lr = predict(glm_, as.matrix(mat), type='response', 
+  s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+
+
+# select those rows that are not zeros every where
+rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
+selected = !near(rows_, 0)
+sum(selected) # only 250 samples are affected
+
+res = tibble(scores = logit_transform(prob_lr[selected,2]), 
+  truth = as.factor(combined$discontinue_flg[selected]))
+
+table(res$truth)
+
+eer_ = calculate_eer(res$scores, res$truth)
+
+print(eer_)
+
+ggplot(res) + aes(scores, group=truth, fill=truth) + 
+    geom_density(alpha = .2) + xlab( 'logit scores' ) 
+
+
+```
+## Lambda values -- lambda.min gives slightly better performance in terms of EER
+                        lambda.min   lambda.1se
+(Intercept)            -0.00695981 -0.003987556
+post_symps_fst8_logit   1.17557973  0.628965488
+post_symps_fst10_logit  1.10902224  0.420009360
+post_symps_fst12_logit  1.00651480  0.550376268
+post_symps_fst13_logit  0.85378658  0.128283356
+post_symps_fst14_logit  0.37511467  .          
+post_symps_fst15_logit  0.93835001  0.013145415
+post_symps_fst16_logit  1.01981925  0.183316290
+post_dme_fst_logit     -0.13981828  .          

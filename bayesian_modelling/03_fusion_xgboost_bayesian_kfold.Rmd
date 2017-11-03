@@ -1,0 +1,172 @@
+---
+title: "Fusion of xgboost and Bayesian inference"
+author: "Norman Poh"
+date: "3 November 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## add the xgboost score this time
+```{r}
+
+logit_xgboost = readRDS('D:/Results/modelling_09_bayesian/logit_xgboost.rds')
+mat_bayes = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
+mat_logistic = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_logistic.rds')
+
+kf = readRDS('D:/Results/modelling_09_bayesian/model/partition.rds')
+
+colnames(mat_logistic) = paste0(colnames(mat_logistic), '_lr')
+colnames(mat_bayes) = paste0(colnames(mat_bayes), '_bayes')
+mat = cbind(logit_xgboost, mat_bayes, mat_logistic)
+
+as.numeric(apply(mat, 2, min))
+
+colnames_ = colnames(mat)
+v=vector('list', 5)
+v[[1]] = which(str_detect(colnames_, 'bayes'))
+v[[2]] = which(str_detect(colnames_, 'logit_lr'))
+v[[3]] = c(1, v[[1]] )
+v[[4]] = c(1, v[[2]] )
+v[[5]] = c(1, v[[1]], v[[2]] )
+
+leg_system = c('Bayes alone', 'LR alone', 'xgb+Bayes', 'xgb+LR', 'xgb+Bayes+LR')
+vexpe = v
+```
+
+## get the hyperparameter
+
+
+```{r}
+target_tab = as.numeric(table(combined$discontinue_flg))
+iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1] 
+
+#checking
+sum(iw[combined$discontinue_flg==1])
+sum(iw[combined$discontinue_flg==0])
+
+glm_lambda = matrix(0, 5, 2)
+
+for (v in 1:5) {
+
+  glm_cv = cv.glmnet(x=as.matrix(mat[,vexpe[[v]]]), y=as.factor(combined$discontinue_flg), 
+    family="binomial",weights = iw, type.measure = "deviance")
+
+  glm_lambda[v,] = c(glm_cv$lambda.min,glm_cv$lambda.1se)
+  plot(glm_cv)
+
+}
+
+colnames(glm_lambda) = c('lambda.min', 'lambda.1se')
+```
+```{r}
+
+logits = vector('list', 5)
+logits.1se = vector('list', 5)
+for (v in 1:5) {
+  
+   
+  column_min = rep(0, nrow(combined))
+  column_1se = rep(0, nrow(combined))
+  for (k in 1:5) {
+    glm_cv = cv.glmnet(x=as.matrix(mat[kf!=k,vexpe[[v]]]),
+      y=as.factor(combined$discontinue_flg[kf!=k]), 
+      family="binomial",weights = iw[kf!=k], type.measure = "deviance")
+    
+    prob_lr = predict(glm_cv, newx=as.matrix(mat[kf==k,vexpe[[v]]]), 
+      type='response', s=c(glm_lambda[v,]))
+    
+    column_min[kf==k] = prob_lr[,1]
+    column_1se[kf==k] = prob_lr[,2]
+  }
+  logits[[v]] = logit_transform(column_min)
+  logits.1se[[v]] = logit_transform(column_1se)
+}  
+
+```
+
+```{r}
+logits_min = as.data.frame(do.call(cbind, logits))
+colnames(logits_min) = leg_system
+
+rows_ = as.data.frame( apply(mat[,vexpe[[1]]], 1, function(x){ sum(x)  }))
+selected_patients_w_var = !near(rows_, 0)
+sum(selected_patients_w_var) # only 250 samples are affected
+
+cutoffs = vector('list', 5)
+
+selected_patients_w_var
+
+colnames_ = colnames(logits_min)
+#readn in a res object
+res = readRDS('D:/Results/modelling_08_copay_test/xgb_profile_v3/res_XGB_3fold.rds')
+for (v in 3:5) {
+  #copy the object back in
+  res$pred$data$truth = combined$discontinue_flg
+  res$pred$data$prob.1 = logits_min[,v] 
+  pr_curve <- perf_binned_perf_curve(pred = res$pred , bin_num = 20)
+  write_csv(pr_curve$curve, 
+    sprintf('%s/PRCurve_%s.csv',results_dir, colnames_[v]))
+}
+
+# output the xgboost PR Curve
+res$pred$data$truth = combined$discontinue_flg
+res$pred$data$prob.1 = logit_xgboost
+pr_curve <- perf_binned_perf_curve(pred = res$pred , bin_num = 20)
+write_csv(pr_curve$curve, 
+  sprintf('%s/PRCurve_xgboost alone.csv',results_dir, colnames_[v]))
+
+  
+res2 = res
+res2$pred$data = res2$pred$data %>% filter(selected_patients_w_var)
+
+for (v in 1:5) {
+  #copy the object back in
+  res2$pred$data$truth = combined$discontinue_flg[selected_patients_w_var]
+  res2$pred$data$prob.1 = logits_min[selected_patients_w_var,v] 
+  pr_curve <- perf_binned_perf_curve(pred = res2$pred , bin_num = 20)
+  write_csv(pr_curve$curve, 
+    sprintf('%s/PRCurve_250_%s.csv',results_dir, colnames_[v]))
+}
+
+# output the xgboost PR Curve subset
+res2$pred$data$prob.1 = logit_xgboost[selected_patients_w_var]
+pr_curve <- perf_binned_perf_curve(pred = res2$pred , bin_num = 20)
+write_csv(pr_curve$curve, 
+  sprintf('%s/PRCurve_250_xgboost alone.csv',results_dir, colnames_[v]))
+
+```
+
+```{r}
+logits_min
+```
+
+
+    pred <- ROCR::prediction( logits_min[,v] , combined$discontinue_flg)
+  perf <- ROCR::performance(pred,"ppv","rec")
+  cutoffs[[v]] <- data.frame(cut=perf@alpha.values[[1]], recall=perf@x.values[[1]], 
+                        precision=perf@y.values[[1]])
+}
+
+pred = list(prob.1 = cutoffs[[3]], truth = combined$discontinue_flg)
+
+pr_curve <- perf_binned_perf_curve(pred = pred , bin_num = 20)
+
+c_ = rbind(cbind(as.data.frame(cutoffs[[3]]), '1'),
+      cbind(as.data.frame(cutoffs[[4]]), '2'),
+      cbind(as.data.frame(cutoffs[[5]]), '3'))
+
+ggplot(cutoffs[[3]], aes(x=recall, y=precision, xend=1, yend=1) ) +  geom_smooth(alpha = .2) +
+  ggplot(cutoffs[[4]], aes(x=recall, y=precision, xend=1, yend=1) ) +
+  ggplot(cutoffs[[5]], aes(x=recall, y=precision, xend=1, yend=1) )
+  
+  + geom_point()
+  
+  fname = paste0(results_dir, "PR_curve_bayesian.png")
+  ggsave(fname, plot = last_plot())
+
+  write_csv(cutoffs, paste0(results_dir,'PR_curve_bayesian.csv'))
+}
