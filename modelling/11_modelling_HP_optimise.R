@@ -88,10 +88,16 @@ res_opt <- resample(learner = lrn_xgb_opt,
                     task = dataset, 
                     resampling = rin)
 
+# add patient_id to resample predictions:
+res_opt$pred$data$pat_id <- patient_ids[res_opt$pred$data$id]
+
 # save optimised resample object
-write_rds(res_opt, paste0(results_dir, "XGBoost_HP_optimised_resample_object.rds"))
+write_rds(res_opt, paste0(results_dir, "XGBoost_HP_optimised_resample_predictions.rds"))
 
 # create PR curve
 pr_opt <- perf_binned_perf_curve(pred = res_opt$pred, bin_num = 100)
 # write out PR curve
 write_csv(pr_opt$curve, paste0(results_dir, "XGBoost_HP_optimised_PR_curve.csv"))
+
+
+
