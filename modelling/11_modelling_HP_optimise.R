@@ -99,5 +99,9 @@ pr_opt <- perf_binned_perf_curve(pred = res_opt$pred, bin_num = 100)
 # write out PR curve
 write_csv(pr_opt$curve, paste0(results_dir, "XGBoost_HP_optimised_PR_curve.csv"))
 
+# train a single model using these hyperparameters:
+
+
+
 
 

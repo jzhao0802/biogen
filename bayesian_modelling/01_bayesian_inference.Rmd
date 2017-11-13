@@ -117,12 +117,14 @@ train_bayes <- function(feature, label, model_prior) {
               x_space = x_space))
 }
 
+# function to generate posterior probability of discontinuation given the feature.
 predict_bayes <- function(model, feature) {
   scores = model$llh1(feature) /(model$llh1(feature) + model$llh0(feature))
+  # score = likelihood_1 / unconditional distribution of feature
   return(scores)
 }
 
-
+# function to spit out model scores and likelihood over a feature space
 inference_bayes <- function(model_bayes, x, legend_label = 'Prob-Bayes') {
   
   if (missing(x)) {
@@ -136,6 +138,7 @@ inference_bayes <- function(model_bayes, x, legend_label = 'Prob-Bayes') {
               )
 }
 
+# this is just for testing the pipeline on one feature
 model = train_bayes(combined$post_ae_fst1_diff, combined$discontinue_flg)
 x = get_feature_space(combined$post_ae_fst1_diff)
 prob_ = predict_bayes(model, x)
@@ -149,6 +152,8 @@ mat__ = inference_bayes(model, x)
 # train glm
 #combined$discontinue_flg = as.factor(combined$discontinue_flg)
 
+# taking an individual feature vector as an example (abdominal pain event)
+# and removing NAs
 dat_ = combined %>% select( one_of(c('post_ae_fst1_diff','discontinue_flg')))
 dat_ = dat_[!is.na(dat_$post_ae_fst1_diff),]
                      
@@ -159,14 +164,17 @@ iw = 1/target_tab[as.numeric(dat_$discontinue_flg)+1]
 sum(iw[dat_$discontinue_flg==1])
 sum(iw[dat_$discontinue_flg==0])
 
-#training
+# training an LR to get weights for abdominal pain event (also training on
+# a constant 1)
 glm_ = glmnet(x=cbind(dat_$post_ae_fst1_diff, 1),
                       y=as.factor(dat_$discontinue_flg), 
                       family="binomial",
               weights = iw)
 
+# running the LR on feature space (again including a constant column of 1s)
 prob_lr = predict(glm_, cbind(x, 1), type='response', s=0.01)
 
+# mat is a matrix of the feature space and the LR probabilities for the feature space.
 mat =  rbind( mat__,
   tibble(x=x, y = as.numeric(prob_lr) , type ='Prob-LR'))
 
@@ -209,13 +217,15 @@ for (m in 2:3) {
   #collect all the variables observable in varlist for model m
   
   #get the variable -- we focus on the diff features only
+  # select all the date diffs which are only in model 2:
   varlist_m = config$Column[ config[, paste0('v', m)] == TRUE ]
   varlist_m = varlist_m [ str_detect(varlist_m, '_diff') ]
   
-  # the variable for which we have a lot of data
+  # the variable for which we have a lot of data (i.e. everything only in model 2
+  # not in the Bayes analysis)
   varlist_m = setdiff(varlist_m, vlist[[m]])
   
-  #collect all the scores together
+  #collect all the data into one vector
   table_ = vector('list', length(varlist_m))
   for (j in 1:length(varlist_m)) {
       fea_ = combined[, varlist_m[j]] 

@@ -83,12 +83,15 @@ fit_kde <- function(x) {x
   return(f)
 }
 
+# function to create evenly spaced sequence from min to mx of a feature
 get_feature_space <- function(feature) {
   stat_ = mystat(feature)
   x = seq(stat_[1], stat_[2],length=100)
   return(x)
 }
 
+# function to get the feature space in 100 equal parts and estimate likelihood
+# functions for the positive and negative classes.
 train_bayes <- function(feature, label, model_prior) {
   
   N_0 = sum(label==0)
@@ -100,6 +103,7 @@ train_bayes <- function(feature, label, model_prior) {
     #llh_1 =approxfun(x_space, llh_, yleft=0, yright=0)
     llh_1 = model_prior$llh1
   } else {
+    # compute likelihood function:
     llh_1 = fit_kde(feature [label==1])
   }
   
@@ -117,6 +121,10 @@ train_bayes <- function(feature, label, model_prior) {
               x_space = x_space))
 }
 
+# This function returns the likelihood of outcome 1, divided by the sum of the
+# likelihoods which is equivalent to the uncondition pdf of the feature.
+# This is therefore a direct application of Bayes' Theorem to the data.
+# The resulting scores are posterior probabilities.
 predict_bayes <- function(model, feature) {
   scores = model$llh1(feature) /(model$llh1(feature) + model$llh0(feature))
   return(scores)

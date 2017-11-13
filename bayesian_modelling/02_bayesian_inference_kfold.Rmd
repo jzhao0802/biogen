@@ -45,34 +45,26 @@ library(ROCR)
 library(pROC) # to calculate auc
 library(glmnet)
 library(dismo)
-source("L:/Lib/analyse_res_cv.R")
-source("L:/Lib/calculate_eer.R")
-source("L:/Lib/config_with_colnames.R")
-source("L:/Lib/create_date_diffs.R")
-source("L:/Lib/cut_linux.R")
-source("L:/Lib/factor2numeric.R")
-source("L:/Lib/make_negative.R")
-source("L:/Lib/make_positive.R")
-source("L:/Lib/make_var_name.R")
-source("L:/Lib/mystat.R")
-source("L:/Lib/plot_cond_density.R")
-source("L:/Lib/remove_inf.R")
-source("L:/Lib/remove_na.R")
-source("L:/Lib/write_xgb_model.R")
+source_files <- list.files("F:/Lachlan/biogen_tecfidera/lib", full.names = TRUE)
+
+for(i in c(1:15, 17:19)) {
+  source(source_files[i])
+}
 
 ```
 
 ```{r}
 
-results_dir = "D:/Results/modelling_09_bayesian/"
+results_dir = "F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/"
 mkdirs(results_dir)
 ```
 
 ## Load the original variables
 
 ```{r}
-combined = readRDS("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_data.rds")
-config = read_csv("D:/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
+data_dir <- "F:/Projects/Biogen_Tecfidera/Data/Processed/"
+combined = read_rds(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_data.rds"))
+config = read_csv(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_config.csv"))
 
 ```
 
@@ -83,6 +75,7 @@ Description = hashmap(config$Column, config$Description)
 var_grouping = hashmap(config$Column, config$var_grouping)
 var_period = hashmap(config$Column, config$var_period)
 
+# define this function for use later:
 remove_na_table <- function(table_) {
   selected = !is.na(table_$x)
   return(table_[selected,])
@@ -90,12 +83,11 @@ remove_na_table <- function(table_) {
 
 ```
 
-## 
-
+## Defining the cross validation split, loading in model_prior and the list of variables
 ```{r}
 if (TRUE) {
   combined$partition =
-    readRDS('D:/Results/modelling_09_bayesian/model/partition.rds')
+    readRDS(paste0(results_dir, "model/partition.rds"))
 } else { # run the following for the first time only
   combined$partition = kfold(1:nrow(combined), k=5, by = combined$discontinue_flg)
   saveRDS(combined$partition,
@@ -104,42 +96,62 @@ if (TRUE) {
 
 kf = combined$partition
 
-model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
-vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
+model_prior = readRDS(paste0(results_dir, "model/model_prior.rds"))
+vlist = readRDS(paste0(results_dir, "model/vlist.rds"))
 
 ```
 ## get the logit scores
 ```{r}
 model_indi = vector('list', 3)
 logits = vector('list', 3)
+
+# for variable sets 2 and 3, get the logit scores:
 for (m in 2:3) {
+  # define list of length equal to number of variables
   model_indi[[m]] = vector('list', length(vlist[[m]]))
   
+  # get the model priors (there are 100)
   x = model_prior[[m]]$x_space
   
+  # this is a 300 row by 3 column dataset, with x , y, and type.
+  # 'type' is split into 3: llh 0, llh 1, and Prob.apriori
+  # (prob-apriori is the posterior probability)
   mat_prior = inference_bayes(model_prior[[m]], x, 
       legend_label='Prob.apriori')
-
+  
+  # this is just a matrix of 0s
   logits[[m]] = matrix(0, nrow(combined), length(vlist[[m]]))
+  
+  # for each of the variables:
   for (i in 1:length(vlist[[m]])) {
     
+    # get the variable and the outcome variable
     combined_ = combined %>% 
       dplyr::select(one_of(c(vlist[[m]][i],'discontinue_flg')))
     colnames(combined_) = c('x','label')
     
+    # a list of 0s equal to the number of rows in the dataset
     column_ = rep(0, nrow(combined))
-    for (k in 1:5) {
-      mat__ = remove_na_table(combined_[kf!=k,])
     
-      # training (with prior model included to add robustness)
+    # train bayes classifier on the training set (!k) and make inference on
+    # the test set (k)
+    for (k in 1:5) {
+      # select everything outside the kth fold and remove missing values
+      mat__ = remove_na_table(combined_[kf!=k,])
+      
+      # training (with prior model included to add robustness).
+      # this object includes two likelihood functions, estimated using
+      # kernel density estimation. It includes a count of the number
+      # of positives and negatives in the non-missing dataset mat__, and
       model_indi_ = train_bayes(mat__$x, mat__$label, model_prior[[m]])
   
       # adaptation
       model_indi[[m]][[i]] = adapt_bayes(model_prior[[m]], 
         model_indi_, relevance_factor=100,x )
     
-      # make inference on the test set
+      # make inference on the test set k
       mat__ = combined_[kf==k,]
+      # takes the log of the likelihoods
       logit_ = predict_bayes_logit(model_indi[[m]][[i]], mat__$x)
       # mat_indi_adapted = inference_bayes(model_indi[[m]][[i]], mat__$x,
       #   legend_label='Prob.Adapted')
@@ -150,6 +162,7 @@ for (m in 2:3) {
     logits[[m]][,i] = column_
   }# for all i
 } # for all m
+
 ```
 
 ## make tha mat matrix from logits data
@@ -164,7 +177,8 @@ colnames(res_data)='count'
 res_logit
 res_data
 
-#put the logit scores together to form the matrix mat
+# put the logit scores together to form the matrix mat
+# output is one matrix of logits- series of logits per variable
 mat = as.data.frame(cbind(logits[[2]], logits[[3]]))
 colnames(mat) = c(vlist[[2]], vlist[[3]])
 colnames(mat) = str_replace(colnames(mat),'_diff','_logit')
@@ -193,6 +207,7 @@ glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg),
 
 plot(glm_, xvar = "dev", label = TRUE)
 
+# optimise for penalisation penalty lambda
 glm_cv = cv.glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
   family="binomial",weights = iw, type.measure = "deviance")
 
@@ -204,19 +219,24 @@ out_ = cbind( coef(glm_cv, s = "lambda.min"),
   coef(glm_cv, s = "lambda.1se"))
 colnames(out_) = c('lambda.min','lambda.1se')
 
+# takes logit scores (likelihoods) and puts them through the LR
+# output is the weighted logit scores
 prob_lr = predict(glm_, as.matrix(mat), type='response', 
   s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
 
 
 # select those rows that are not zeros every where
+# this shows only 250 patients are affected by this analysis.
 rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
 selected = !near(rows_, 0)
 sum(selected) # only 250 samples are affected
 
+# Function to output logit (log of prob ratio) for a set of probabilities
 logit_transform <- function(x) {
   return(log(x) - log(1-x))
 }
 
+# comparing scores and truth for these 250 patients
 res = tibble(scores = logit_transform(prob_lr[selected,3]), 
   truth = as.factor(combined$discontinue_flg[selected]))
 
@@ -243,6 +263,7 @@ post_dme_fst_logit     0.68857199 0.38052039
 
 ## Get the PR curve based on the 250 patients affected
 ```{r}
+# create PR curve for this model
 pred <- ROCR::prediction( res$scores , res$truth)
 perf <- ROCR::performance(pred,"ppv","rec")
 cutoffs <- data.frame(cut=perf@alpha.values[[1]], recall=perf@x.values[[1]], 
