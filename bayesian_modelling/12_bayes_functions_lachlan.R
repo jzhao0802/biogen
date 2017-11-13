@@ -57,3 +57,26 @@ predict_bayes <- function(model, feature) {
   scores = model$llh1(feature) /(model$llh1(feature) + model$llh0(feature))
   return(scores)
 }
+
+predict_bayes_logit <- function(model, feature) {
+  scores = log(model$llh1(feature)+.Machine$double.xmin) -
+    log(model$llh0(feature)+.Machine$double.xmin)
+  selected = is.na(scores)
+  scores[selected] = 0
+  return(scores)
+}
+
+
+inference_bayes <- function(model_bayes, x, legend_label = 'Prob-Bayes') {
+  
+  if (missing(x)) {
+    x = model_bayes$x_space
+  }
+  
+  prob_ = predict_bayes(model_bayes, x)
+  mat =  rbind( tibble(x=x, y = model_bayes$llh0(x) * 20, type='llh 0'),
+                tibble(x=x, y = model_bayes$llh1(x) * 20, type='llh 1'),
+                tibble(x=x, y = prob_ , type =legend_label)
+  )
+}
+

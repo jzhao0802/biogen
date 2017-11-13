@@ -73,6 +73,17 @@ var_grouping = hashmap(config$Column, config$var_grouping)
 var_period = hashmap(config$Column, config$var_period)
 
 ```
+## Define the variables not used in by model 3
+
+```{r}
+vlist = vector('list', 3)
+vlist[[2]] = c('post_symps_fst8_diff','post_symps_fst10_diff','post_symps_fst12_diff','post_symps_fst13_diff','post_symps_fst14_diff','post_symps_fst15_diff','post_symps_fst16_diff')
+
+vlist[[3]] = c('post_dme_fst_diff')
+
+vlist[[1]] = c('pre_ae_num2','pre_comdx_num2','pre_comdx_num4','pre_comdx_num6','pre_comdx_num8','pre_comdx_num9','pre_comdx_num10','pre_comdx_num12','pre_comdx_num14','pre_comdx_num15','pre_comdx_num16','pre_comdx_num18','pre_comdx_num19','pre_comdx_num21','pre_comdx_num22','pre_comdx_num23','pre_comdx_num24','pre_comdx_num25','pre_comdx_num26','pre_concom_cdes_num1','pre_concom_gpif_num8','pre_concom_gpif_num12','pre_concom_gpif_num16','pre_concom_gpif_num18','pre_concom_gpif_num19','pre_concom_gpif_num21','pre_concom_gpif_num22','pre_concom_ndc_num2','pre_concom_ndc_num4','pre_concom_ndc_num6','pre_medication_num11','pre_medication_num13','pre_medication_num14','pre_medication_num15','pre_sympf_num1','pre_sympf_num4','pre_sympf_num5','pre_symps_num2','pre_symps_num4','pre_symps_num5','pre_symps_num6','pre_symps_num7','pre_symps_num8','pre_symps_num10','pre_symps_num12','pre_symps_num13','pre_symps_num14','pre_symps_num15','pre_symps_num16','pre_sub_confinements','pre_comdx_lst4_diff','pre_comdx_lst8_diff','pre_comdx_lst14_diff','pre_comdx_lst15_diff','pre_comdx_lst16_diff','pre_comdx_lst21_diff','pre_comdx_lst22_diff','pre_comdx_lst23_diff','pre_comdx_lst24_diff','pre_comdx_lst26_diff','pre_concom_gpif_lst8_diff','pre_concom_gpif_lst12_diff','pre_concom_gpif_lst18_diff','pre_concom_gpif_lst19_diff','pre_concom_gpif_lst21_diff','pre_concom_ndc_lst4_diff','pre_concom_ndc_lst6_diff','pre_medication_lst11_diff','pre_medication_lst13_diff','pre_medication_lst14_diff','pre_medication_lst15_diff','pre_symps_lst4_diff','pre_symps_lst5_diff','pre_symps_lst6_diff','pre_symps_lst7_diff','pre_symps_lst8_diff','pre_symps_lst10_diff','pre_symps_lst13_diff','pre_symps_lst14_diff','pre_symps_lst15_diff','pre_symps_lst16_diff','pre_script_lst_dayssup_diff','pre_concom_gpif_num2','pre_medication_num27')
+```
+
 
 ## Bayesian inference helper functions
 ```{r}
@@ -239,21 +250,10 @@ ggplot(data=mat %>% filter( type %in% c('llh 0','llh 1')),
 
 ```
 
-## Define the variables not used in by model 3
-
-```{r}
-vlist = vector('list', 3)
-vlist[[2]] = c('post_symps_fst8_diff','post_symps_fst10_diff','post_symps_fst12_diff','post_symps_fst13_diff','post_symps_fst14_diff','post_symps_fst15_diff','post_symps_fst16_diff')
-
-vlist[[3]] = c('post_dme_fst_diff')
-
-vlist[[1]] = c('pre_ae_num2','pre_comdx_num2','pre_comdx_num4','pre_comdx_num6','pre_comdx_num8','pre_comdx_num9','pre_comdx_num10','pre_comdx_num12','pre_comdx_num14','pre_comdx_num15','pre_comdx_num16','pre_comdx_num18','pre_comdx_num19','pre_comdx_num21','pre_comdx_num22','pre_comdx_num23','pre_comdx_num24','pre_comdx_num25','pre_comdx_num26','pre_concom_cdes_num1','pre_concom_gpif_num8','pre_concom_gpif_num12','pre_concom_gpif_num16','pre_concom_gpif_num18','pre_concom_gpif_num19','pre_concom_gpif_num21','pre_concom_gpif_num22','pre_concom_ndc_num2','pre_concom_ndc_num4','pre_concom_ndc_num6','pre_medication_num11','pre_medication_num13','pre_medication_num14','pre_medication_num15','pre_sympf_num1','pre_sympf_num4','pre_sympf_num5','pre_symps_num2','pre_symps_num4','pre_symps_num5','pre_symps_num6','pre_symps_num7','pre_symps_num8','pre_symps_num10','pre_symps_num12','pre_symps_num13','pre_symps_num14','pre_symps_num15','pre_symps_num16','pre_sub_confinements','pre_comdx_lst4_diff','pre_comdx_lst8_diff','pre_comdx_lst14_diff','pre_comdx_lst15_diff','pre_comdx_lst16_diff','pre_comdx_lst21_diff','pre_comdx_lst22_diff','pre_comdx_lst23_diff','pre_comdx_lst24_diff','pre_comdx_lst26_diff','pre_concom_gpif_lst8_diff','pre_concom_gpif_lst12_diff','pre_concom_gpif_lst18_diff','pre_concom_gpif_lst19_diff','pre_concom_gpif_lst21_diff','pre_concom_ndc_lst4_diff','pre_concom_ndc_lst6_diff','pre_medication_lst11_diff','pre_medication_lst13_diff','pre_medication_lst14_diff','pre_medication_lst15_diff','pre_symps_lst4_diff','pre_symps_lst5_diff','pre_symps_lst6_diff','pre_symps_lst7_diff','pre_symps_lst8_diff','pre_symps_lst10_diff','pre_symps_lst13_diff','pre_symps_lst14_diff','pre_symps_lst15_diff','pre_symps_lst16_diff','pre_script_lst_dayssup_diff','pre_concom_gpif_num2','pre_medication_num27')
-```
-
 # Get the prior models
 ```{r}
 model_prior = vector('list', 3)
-
+model_prior_data = vector('list', 3)
 for (m in 2:3) {
 
   #collect all the variables observable in varlist for model m
@@ -277,6 +277,8 @@ for (m in 2:3) {
   
   table__ = bind_rows(table_)
   
+  model_prior_data[[m]] = table__
+  
   model_prior[[m]] = train_bayes(table__$x, table__$label)
   x_ = get_feature_space(table__$x)  
   mat__ = inference_bayes(model_prior[[m]], x_)
@@ -287,13 +289,64 @@ for (m in 2:3) {
     xlab(Description[['general']]) +
     ylab('Likelihood x 20, Probability')
   print(gg)  
-  
+  fname = sprintf( "D:/Results/modelling_09_bayesian/ggplots/01_bayesian_inference_functions__aggregated_density_v%dmodel.png",m )
+
+  ggsave(fname, plot = last_plot())
 }
-saveRDS(model_prior,'D:/Results/modelling_09_bayesian/model/model_prior.rds')
-saveRDS(vlist,'D:/Results/modelling_09_bayesian/model/vlist.rds')
 ```
 
-##  Fit the individual left out variables 
+## Now train a logistic regression instead
+```{r}
+model_prior_lr = vector('list',3)
+for (m in 2:3) {
+  data_ = model_prior_data[[m]]
+  target_tab = as.numeric(table(data_$label))
+  iw = 1/target_tab[as.numeric(data_$label)+1] 
+
+  #checking
+  sum(iw[data_$label==1])
+  sum(iw[data_$label==0])
+
+  # glm_ = glmnet::glmnet(x=cbind(data_$x, 1), y=as.factor(data_$label), 
+  #   family="binomial",weights = iw)
+  glm_cv = cv.glmnet(x=cbind(data_$x, 1), y=as.factor(data_$label), 
+    family="binomial",weights = iw, type.measure = "deviance")
+  
+  model_prior_lr[[m]] = glm_cv
+  plot(glm_cv)
+  glm_cv$lambda.min
+  glm_cv$lambda.1se
+ 
+  x = model_prior[[m]]$x_space
+  prob_lr = predict(glm_cv, newx=cbind(x,1), type='response', 
+    s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+ 
+  mat__ = rbind(inference_bayes(model_prior[[m]], x),
+                tibble(x=x_,y=prob_lr[,2], type='LR(lambda.min)'),
+                tibble(x=x_,y=prob_lr[,3], type='LR(lambda.1se)'))
+  
+  gg = ggplot(data=mat__, aes(x=x, y=y, group = type, colour = type)) +
+    geom_line() +
+    geom_point( size=2, shape=21)  + #, fill="white")
+    xlab(Description[['general']]) +
+    ylab('Likelihood x 20, Probability')
+  print(gg)  
+  fname = sprintf( "D:/Results/modelling_09_bayesian/ggplots/01_bayesian_inference_functions__aggregated_density_v%dmodel_logistic.png",m )
+}
+
+```
+## save the model
+
+```{r}
+saveRDS(model_prior,'D:/Results/modelling_09_bayesian/model/model_prior.rds')
+saveRDS(vlist,'D:/Results/modelling_09_bayesian/model/vlist.rds')
+
+# for the logistic regression -- we will save the data as well for adaptation purpose. model_prior_lr contains pre-trained models as well
+saveRDS(model_prior_lr,'D:/Results/modelling_09_bayesian/model/model_prior_lr.rds')
+saveRDS(model_prior_data,'D:/Results/modelling_09_bayesian/model/model_prior_data.rds')
+```
+
+##  Fit the individual left out variables -- just a dry run here since we are not doing kfold validation
 ```{r}
 model_indi = vector('list', 3)
 
@@ -338,18 +391,9 @@ for (m in 2:3) {
     
     print(gg)  
     
-    fname = sprintf( "D:/Results/modelling_09_bayesian/01_bayesian_inference__density_prob__%s.png",vlist[[m]][i] )
+    fname = sprintf( "D:/Results/modelling_09_bayesian/ggplots/01_bayesian_inference__density_prob__%s.png",vlist[[m]][i] )
 
   ggsave(fname, plot = last_plot())
     
   }  
 }
-
-```
-## kfold
-
-```{r}
-
-
-
-```

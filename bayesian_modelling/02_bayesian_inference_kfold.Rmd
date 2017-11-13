@@ -29,7 +29,7 @@ subst L: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
 subst D: C:\Users\npoh\Documents\myProjects\Biogen_Tecfidera
 
 ```{r}
-#rm(list = ls())
+rm(list = ls())
 setwd("L:/modelling")
 library(palab)
 library(palabmod)
@@ -68,7 +68,7 @@ config = read_csv(paste0(data_dir, "combined_date_complied_rectified_num_gaba_co
 
 ```
 
-## Get the map up
+## Get the map up plus additional functions
 
 ```{r}
 Description = hashmap(config$Column, config$Description)
@@ -96,11 +96,19 @@ if (TRUE) {
 
 kf = combined$partition
 
+<<<<<<< HEAD
 model_prior = readRDS(paste0(results_dir, "model/model_prior.rds"))
 vlist = readRDS(paste0(results_dir, "model/vlist.rds"))
 
+=======
+model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
+vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
+model_prior_data = readRDS('D:/Results/modelling_09_bayesian/model/model_prior_data.rds')
+>>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
 ```
-## get the logit scores
+
+## get the logit scores using Bayesian inference
+
 ```{r}
 model_indi = vector('list', 3)
 logits = vector('list', 3)
@@ -165,7 +173,7 @@ for (m in 2:3) {
 
 ```
 
-## make tha mat matrix from logits data
+## make the mat matrix from logits data
 ```{r}
 # how many nonzeros can we expect per column?
 res_logit = as.data.frame(apply(logits[[2]], 2, function(x) {sum(!near(x, 0))}))
@@ -183,17 +191,19 @@ mat = as.data.frame(cbind(logits[[2]], logits[[3]]))
 colnames(mat) = c(vlist[[2]], vlist[[3]])
 colnames(mat) = str_replace(colnames(mat),'_diff','_logit')
 
-
 # truncate extreme values
 mat = as.data.frame( apply(mat, 2, function(x){ ifelse(x < -700, -8, x) }))
 
 min(mat)
 
-
+saveRDS(mat,'D:/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
 ```
+
 ## train glm on all the data set to get the weights
 
 ```{r}
+mat = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
+
 #training
 target_tab = as.numeric(table(combined$discontinue_flg))
 iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1] 
@@ -202,10 +212,9 @@ iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1]
 sum(iw[combined$discontinue_flg==1])
 sum(iw[combined$discontinue_flg==0])
 
-glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
-  family="binomial",weights = iw)
-
-plot(glm_, xvar = "dev", label = TRUE)
+# glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+#   family="binomial",weights = iw)
+# plot(glm_, xvar = "dev", label = TRUE)
 
 # optimise for penalisation penalty lambda
 glm_cv = cv.glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
@@ -219,18 +228,26 @@ out_ = cbind( coef(glm_cv, s = "lambda.min"),
   coef(glm_cv, s = "lambda.1se"))
 colnames(out_) = c('lambda.min','lambda.1se')
 
+<<<<<<< HEAD
 # takes logit scores (likelihoods) and puts them through the LR
 # output is the weighted logit scores
 prob_lr = predict(glm_, as.matrix(mat), type='response', 
   s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
+=======
+# prob_lr = predict(glm_, as.matrix(mat), type='response', 
+#   s=c(glm_cv$lambda.min, glm_cv$lambda.1se)) 
+prob_lr = predict(glm_cv, as.matrix(mat), type='response', 
+  s=c(glm_cv$lambda.min,glm_cv$lambda.1se) )
+>>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
 
 
 # select those rows that are not zeros every where
 # this shows only 250 patients are affected by this analysis.
 rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
-selected = !near(rows_, 0)
-sum(selected) # only 250 samples are affected
+selected_patients_w_var = !near(rows_, 0)
+sum(selected_patients_w_var) # only 250 samples are affected
 
+<<<<<<< HEAD
 # Function to output logit (log of prob ratio) for a set of probabilities
 logit_transform <- function(x) {
   return(log(x) - log(1-x))
@@ -239,12 +256,24 @@ logit_transform <- function(x) {
 # comparing scores and truth for these 250 patients
 res = tibble(scores = logit_transform(prob_lr[selected,3]), 
   truth = as.factor(combined$discontinue_flg[selected]))
+=======
+logit_transform <-function(x) {
+  #expect x to be probability
+  x[is.na(x)] = 0.5 # so replace NA with non-informative prior,i.e., 0.5
+  return(log(x) - log(1-x))
+}
 
-table(res$truth)
+res_subset = tibble(scores = logit_transform(prob_lr[selected_patients_w_var,1]), 
+  truth = as.factor(combined$discontinue_flg[selected_patients_w_var]))
+>>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
 
-eer_ = calculate_eer(res$scores, res$truth)
+table(res_subset$truth)
 
-ggplot(res) + aes(scores, group=truth, fill=truth) + 
+eer_subset = calculate_eer(res_subset$scores, res_subset$truth)
+
+print(eer_subset)
+
+ggplot(res_subset) + aes(scores, group=truth, fill=truth) + 
     geom_density(alpha = .2) + xlab( 'logit scores' ) 
 ```
 ## optimal values found on the logit score matrix after capping the negative class to -8
@@ -260,6 +289,107 @@ post_symps_fst15_logit 0.76898446 0.26473180
 post_symps_fst16_logit 0.82319008 0.30008792
 post_dme_fst_logit     0.68857199 0.38052039
 
+                       lambda.min lambda.1se
+(Intercept)            0.01111544 0.01448999
+post_symps_fst8_logit  1.29003716 0.45061506
+post_symps_fst10_logit 1.03299881 0.39392491
+post_symps_fst12_logit 1.31048222 0.49888351
+post_symps_fst13_logit 0.41639702 0.21769872
+post_symps_fst14_logit 0.68394755 0.24923403
+post_symps_fst15_logit 1.14252495 0.30442489
+post_symps_fst16_logit 1.32267556 0.33738896
+post_dme_fst_logit     0.82121410 0.41434513
+
+## train glm on all the data set to get the weights; this time with also xgboost's output
+
+```{r}
+#add the xgboost score this time
+logit_xgboost = readRDS('D:/Results/modelling_09_bayesian/logit_xgboost.rds')
+mat = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
+mat_ = cbind(logit_xgboost, mat)
+mat = mat_
+
+#training
+target_tab = as.numeric(table(combined$discontinue_flg))
+iw = 1/target_tab[as.numeric(combined$discontinue_flg)+1] 
+
+#checking
+sum(iw[combined$discontinue_flg==1])
+sum(iw[combined$discontinue_flg==0])
+
+# glm_ = glmnet::glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+#   family="binomial",weights = iw)
+# plot(glm_, xvar = "dev", label = TRUE)
+
+glm_cv = cv.glmnet(x=as.matrix(mat), y=as.factor(combined$discontinue_flg), 
+  family="binomial",weights = iw, type.measure = "deviance")
+
+plot(glm_cv)
+glm_cv$lambda.min
+glm_cv$lambda.1se
+
+out_ = cbind( coef(glm_cv, s = "lambda.min"),
+  coef(glm_cv, s = "lambda.1se"))
+colnames(out_) = c('lambda.min','lambda.1se')
+print(out_)
+
+prob_lr = predict(glm_, as.matrix(mat), type='response', 
+  s=c(glm_cv$lambda.min) )
+
+
+# select those rows that are not zeros every where
+rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
+selected = !near(rows_, 0)
+sum(selected) 
+
+res = tibble(scores = logit_transform(prob_lr[,1]), 
+  truth = as.factor(combined$discontinue_flg))
+
+table(res$truth)
+
+eer_ = calculate_eer(res$scores, res$truth)
+eer_xg = calculate_eer(logit_xgboost, res$truth)
+
+# analyse those selected samples only
+
+eer_ = calculate_eer(res$scores[selected_patients_w_var], 
+  res$truth[selected_patients_w_var])
+eer_xg = calculate_eer(logit_xgboost[selected_patients_w_var], 
+  res$truth[selected_patients_w_var])
+
+print(eer_)
+res$scores_xg = logit_xgboost
+
+ggplot(res %>% filter(selected_patients_w_var)) + aes(scores, group=truth, fill=truth) + 
+    geom_density(alpha = .2) + xlab( 'logit scores' ) + ggtitle('Bayesian+xgboost')
+fname = paste0(results_dir, "logit_distribution__Bayesian+xgboost.png")
+ggsave(fname, plot = last_plot())
+
+ggplot(res %>% filter(selected_patients_w_var)) + aes(scores_xg, group=truth, fill=truth) + 
+    geom_density(alpha = .2) + xlab( 'logit scores' ) + ggtitle('xgboost alone')
+fname = paste0(results_dir, "logit_distribution__xgboost_alone.png")
+ggsave(fname, plot = last_plot())
+
+```
+## Lambda outputs
+
+10 x 2 sparse Matrix of class "dgCMatrix"
+                       lambda.min lambda.1se
+(Intercept)             1.3469325  1.1434699
+logit_xgboost           0.6533589  0.5499812
+post_symps_fst8_logit   0.7501340  .        
+post_symps_fst10_logit  0.8941303  .        
+post_symps_fst12_logit  1.5575532  .        
+post_symps_fst13_logit  0.6601543  .        
+post_symps_fst14_logit  0.5653941  .        
+post_symps_fst15_logit  0.7979038  .        
+post_symps_fst16_logit  0.8440861  .        
+post_dme_fst_logit      0.6261730  .        
+
+> eer_
+[1] 0.1309478
+> eer_xg
+[1] 0.1884913
 
 ## Get the PR curve based on the 250 patients affected
 ```{r}
@@ -272,4 +402,9 @@ cutoffs <- data.frame(cut=perf@alpha.values[[1]], recall=perf@x.values[[1]],
 ggplot(cutoffs) + aes(x=recall, y=precision, xend=1, yend=1) + 
     geom_smooth(alpha = .2) + geom_point()
 
+fname = paste0(results_dir, "PR_curve_bayesian.png")
+ggsave(fname, plot = last_plot())
+
+write_csv(cutoffs, paste0(results_dir,'PR_curve_bayesian.csv'))
+#write_csv(out_@Dimnames, paste0(results_dir,'gamma_bayesian.csv'))
 ```
