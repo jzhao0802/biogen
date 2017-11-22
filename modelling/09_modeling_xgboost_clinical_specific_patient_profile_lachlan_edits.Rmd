@@ -83,13 +83,14 @@ config = read_csv(paste0(data_dir, "combined_date_complied_rectified_num_gaba_co
 ## Get the map up
 
 ```{r}
-# LM: I haven't used these. They look cool but what are they for?
+# LM: These look cool but what are they for?
 Description = hashmap(config$Column, config$Description)
 var_grouping = hashmap(config$Column, config$var_grouping)
 var_period = hashmap(config$Column, config$var_period)
 ```
 
 ## remove the variables!
+We want to remove variables which won't be used in any models
 
 ```{r}
 config$v0  = !(config$v1 | config$v2 | config$v3 | config$v4)

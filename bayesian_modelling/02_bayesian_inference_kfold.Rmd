@@ -96,15 +96,10 @@ if (TRUE) {
 
 kf = combined$partition
 
-<<<<<<< HEAD
-model_prior = readRDS(paste0(results_dir, "model/model_prior.rds"))
-vlist = readRDS(paste0(results_dir, "model/vlist.rds"))
-
-=======
 model_prior = readRDS('D:/Results/modelling_09_bayesian/model/model_prior.rds')
 vlist = readRDS('D:/Results/modelling_09_bayesian/model/vlist.rds')
 model_prior_data = readRDS('D:/Results/modelling_09_bayesian/model/model_prior_data.rds')
->>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
+
 ```
 
 ## get the logit scores using Bayesian inference
@@ -228,17 +223,13 @@ out_ = cbind( coef(glm_cv, s = "lambda.min"),
   coef(glm_cv, s = "lambda.1se"))
 colnames(out_) = c('lambda.min','lambda.1se')
 
-<<<<<<< HEAD
-# takes logit scores (likelihoods) and puts them through the LR
-# output is the weighted logit scores
-prob_lr = predict(glm_, as.matrix(mat), type='response', 
-  s=c(0.01, glm_cv$lambda.min, glm_cv$lambda.1se)) 
-=======
+
+
 # prob_lr = predict(glm_, as.matrix(mat), type='response', 
 #   s=c(glm_cv$lambda.min, glm_cv$lambda.1se)) 
 prob_lr = predict(glm_cv, as.matrix(mat), type='response', 
   s=c(glm_cv$lambda.min,glm_cv$lambda.1se) )
->>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
+
 
 
 # select those rows that are not zeros every where
@@ -247,16 +238,7 @@ rows_ = as.data.frame( apply(mat, 1, function(x){ sum(x)  }))
 selected_patients_w_var = !near(rows_, 0)
 sum(selected_patients_w_var) # only 250 samples are affected
 
-<<<<<<< HEAD
-# Function to output logit (log of prob ratio) for a set of probabilities
-logit_transform <- function(x) {
-  return(log(x) - log(1-x))
-}
 
-# comparing scores and truth for these 250 patients
-res = tibble(scores = logit_transform(prob_lr[selected,3]), 
-  truth = as.factor(combined$discontinue_flg[selected]))
-=======
 logit_transform <-function(x) {
   #expect x to be probability
   x[is.na(x)] = 0.5 # so replace NA with non-informative prior,i.e., 0.5
@@ -265,7 +247,7 @@ logit_transform <-function(x) {
 
 res_subset = tibble(scores = logit_transform(prob_lr[selected_patients_w_var,1]), 
   truth = as.factor(combined$discontinue_flg[selected_patients_w_var]))
->>>>>>> 70c8abecc7b3fe455a70b000ebd8df62e9f4d0d5
+
 
 table(res_subset$truth)
 

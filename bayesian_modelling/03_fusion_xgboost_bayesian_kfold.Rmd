@@ -13,18 +13,22 @@ knitr::opts_chunk$set(echo = TRUE)
 ## add the xgboost score this time
 ```{r}
 
-logit_xgboost = readRDS('D:/Results/modelling_09_bayesian/logit_xgboost.rds')
-mat_bayes = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
-mat_logistic = readRDS('D:/Results/modelling_09_bayesian/mat__logit_scores_logistic.rds')
+logit_xgboost = readRDS('F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/logit_xgboost.rds')
+mat_bayes = readRDS('F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/mat__logit_scores_bayes.rds')
+mat_logistic = readRDS('F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/mat__logit_scores_logistic.rds')
 
-kf = readRDS('D:/Results/modelling_09_bayesian/model/partition.rds')
+# cross validation folds
+kf = readRDS('F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/model/partition.rds')
 
-colnames(mat_logistic) = paste0(colnames(mat_logistic), '_lr')
+
+colnames(mat_logistic) = paste0(colnames(mat_logistic), 'logit_lr')
 colnames(mat_bayes) = paste0(colnames(mat_bayes), '_bayes')
+# bind all these logits together into one dataframe
 mat = cbind(logit_xgboost, mat_bayes, mat_logistic)
 
 as.numeric(apply(mat, 2, min))
 
+# configure different sets of logit scores (1 is for XGBoost)
 colnames_ = colnames(mat)
 v=vector('list', 5)
 v[[1]] = which(str_detect(colnames_, 'bayes'))
@@ -62,6 +66,10 @@ for (v in 1:5) {
 
 colnames(glm_lambda) = c('lambda.min', 'lambda.1se')
 ```
+
+The next section involves predicting the outcome as a function of the 
+logits, using a logistic regression.
+This is achived using 5-fold CV.
 ```{r}
 
 logits = vector('list', 5)
@@ -102,7 +110,7 @@ selected_patients_w_var
 
 colnames_ = colnames(logits_min)
 #readn in a res object
-res = readRDS('D:/Results/modelling_08_copay_test/xgb_profile_v3/res_XGB_3fold.rds')
+res = readRDS('F:/Projects/Biogen_Tecfidera/Results/modelling_08_copay_test/xgb_profile_v3/res_XGB_3fold.rds')
 for (v in 3:5) {
   #copy the object back in
   res$pred$data$truth = combined$discontinue_flg

@@ -51,13 +51,14 @@ train_bayes <- function(feature, label, model__prior) {
 
 # This function returns the likelihood of outcome 1 divided by the sum of the
 # likelihoods which is equivalent to the unconditional pdf of the feature.
-# This is therefore a direct application of Bayes' Theorem to the data.
-# The resulting scores are posterior probabilities.
+
 predict_bayes <- function(model, feature) {
   scores = model$llh1(feature) /(model$llh1(feature) + model$llh0(feature))
   return(scores)
 }
 
+# This outputs log likelihood ratios (logit) for each observation, replacing
+# NA with 0.
 predict_bayes_logit <- function(model, feature) {
   scores = log(model$llh1(feature)+.Machine$double.xmin) -
     log(model$llh0(feature)+.Machine$double.xmin)
@@ -80,3 +81,9 @@ inference_bayes <- function(model_bayes, x, legend_label = 'Prob-Bayes') {
   )
 }
 
+
+logit_transform <-function(x) {
+  #expect x to be probability
+  x[is.na(x)] = 0.5 # so replace NA with non-informative prior,i.e., 0.5
+  return(log(x) - log(1-x))
+}
