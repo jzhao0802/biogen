@@ -18,27 +18,27 @@ results_dir <- "F:/Projects/Biogen_Tecfidera/Results/modelling_10_HP_optimisatio
 # DATA AND CONFIG FILE ----------------------------------------------------
 
 var_config <- read_csv("F:/Projects/Biogen_Tecfidera/Data/Processed/combined_date_complied_rectified_num_gaba_copay_config.csv")
-data <- read_rds(paste0(data_dir, "data_model_3_for_HP_search.rds"))
+raw_data <- read_rds(paste0(data_dir, "data_model_3_for_HP_search.rds"))
 
 
 
 # PREPROCESS --------------------------------------------------------------
 
 # quick check looks like 714 out of 812 variables in data are in var_config
-var_config$Description[grep(paste(var_config$Column, collapse = "|"), colnames(data))]
+var_config$Description[grep(paste(var_config$Column, collapse = "|"), colnames(raw_data))]
 
 # remove patient_id
-patient_ids <- data$pat_id
-data$pat_id <- NULL
+patient_ids <- raw_data$pat_id
+raw_data$pat_id <- NULL
 
 # set label to factor
-data$label <- as.factor(data$discontinue_flg_1_0)
-data$discontinue_flg_1_0 <- NULL
+raw_data$label <- as.factor(raw_data$discontinue_flg_1_0)
+raw_data$discontinue_flg_1_0 <- NULL
 
 # correct for whitespace, slashes and hyphens in column names
-colnames(data) <- gsub(pattern = " ", replacement = "_", x = colnames(data))
-colnames(data) <- gsub(pattern = "/", replacement = "_", x = colnames(data))
-colnames(data) <- gsub(pattern = "-", replacement = "_", x = colnames(data))
+colnames(raw_data) <- gsub(pattern = " ", replacement = "_", x = colnames(raw_data))
+colnames(raw_data) <- gsub(pattern = "/", replacement = "_", x = colnames(raw_data))
+colnames(raw_data) <- gsub(pattern = "-", replacement = "_", x = colnames(raw_data))
 
 # MLR PIPELINE -----------------------------------------------------------
 

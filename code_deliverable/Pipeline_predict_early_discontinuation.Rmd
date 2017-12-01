@@ -1,0 +1,453 @@
+---
+title: "Modelling pipeline for prediction of early Tecfidera discontinuation"
+author: "Lachlan McLachlan; lachlan.mclachlan@iqvia.com"
+date: "1st December 2017"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+## Introduction
+
+Biogen has engaged with [IQVIA](https://www.iqvia.com) to build a predictive
+model to identify patients initiated on Tecfidera who at risk of early
+discontinuation.
+
+The following notebook provides a pipeline for building such a model, 
+starting with a clean dataset, producing visual representations of the data,
+building a predictive model, evaluating model performance,
+and augmenting the model with clinical insight.
+
+While effort has been made to ensure this material is accessible to
+an informed lay-audience, it assumes the reader is familiar with
+techniques such as cross-validation, parameter tuning, decision trees, and
+the R language.
+
+Links to relevant material are provided where available.
+
+
+***
+
+### Load in relevant libraries and functions
+If these are yet to be installed, please run:
+
+```{r eval = FALSE, message = FALSE}
+install.packages(c("mlr", "tidyverse", "xgboost", "Ckmeans.1d.dp", "data.table"))
+```
+#
+...else run the following:
+
+```{r warning=FALSE, message = FALSE}
+library(mlr)
+library(tidyverse)
+library(xgboost)
+library(data.table)
+```
+#
+Please define a directory from which to load the data, predictor 
+descriptions and the weights for the Bayesian analysis.
+Please also source the functions which are required to run this notebook
+(called *"Biogen_modelling_functions.R"*):
+
+```{r}
+data_dir <- "INSERT PATH TO DATA, CLINICAL WEIGHTS, AND PREDICTOR DESCRIPTIONS"
+source("INSERT PATH TO BIOGEN MODELLING FUNCTIONS")
+```
+#
+### Load in the dataset and descriptions file  
+
+* Note: The following code assumes the data, descriptions and weights
+files are named as below *
+
+```{r echo = TRUE, message =  FALSE}
+# All columns read in as numeric except patient id (pat_id)
+raw_data <- paste0(data_dir, "data_for_biogen_tec_model.csv") %>%  
+  read_csv( col_types = cols(pat_id = col_character(), .default = col_number()))
+
+descriptions <- paste0(data_dir, "predictor_descriptions.csv") %>%  read_csv()
+
+# read in weights required for the bayesian method
+weights_df <- read_csv(paste0(data_dir, "clinician_weights.csv"))
+
+```
+
+### Plotting distributions
+It is useful from both a quality control and data exploration perspective
+to plot some distibutions over variables of interest.  
+
+We'll split these distributions by the two classes of the outcome variable
+*(i.e one density plot for positives and one for negatives on the same plot)*. 
+This enables us to look for obvious points our model might exploit when
+distinguishing between the two outcome classes.
+
+```{r warning=FALSE}
+# density plot split by outcome variable for number of days between initiation
+# and first lab/radiology event.
+ggplot(raw_data, aes(post_lab_radio_date_fst_diff, group=as.factor(discontinue_flg_1_0), fill=as.factor(discontinue_flg_1_0))) +
+     geom_density(alpha = .2, kernel = "gaussian") + 
+  xlab( 'Number of days following Tecfidera initiation before first lab/radiology event' )
+
+# density plot split by outcome variable for number of days between initiation
+# and first lab/radiology event.
+ggplot(raw_data, aes(post_symps_fst3_diff, group=as.factor(discontinue_flg_1_0), fill=as.factor(discontinue_flg_1_0))) +
+     geom_density(alpha = .2, kernel = "gaussian") + 
+  xlab( 'Number of days following Tecfidera initiation 
+        before first fatigue/malaise event' )
+```
+
+ ***
+ 
+## Modelling
+
+#### Create a machine learning classification task and an XGBoost learner:
+We have selected [XGBoost](http://xgboost.readthedocs.io/en/latest/) as our
+algorithim of choice (having explored other options and found it to be best 
+suited to the task)
+```{r warning = FALSE}
+# extract patient ids and set to null
+id <- raw_data$pat_id
+raw_data$pat_id <- NULL
+
+# convert the outcome variable to a factor and rename as 'label'
+model_data <- raw_data %>% 
+  mutate(discontinue_flg_1_0 = as.factor(discontinue_flg_1_0)) %>%
+  rename(label = discontinue_flg_1_0)
+
+# create machine learning task
+dataset <- makeClassifTask(id = "Data for HP search", data = model_data, 
+                           target = "label", positive = 1)
+
+# create XGBOOST learner
+lrn_xgb <- makeLearner(cl = "classif.xgboost", predict.type = "prob")
+
+# set basic modelling parameters:
+lrn_xgb$par.vals <- list(nrounds = 100, 
+                         verbose = FALSE, 
+                         objective = "binary:logistic")
+```
+
+#
+
+#### Tune Hyperparameters
+*more information on XGBoost's hyperparameters can be found [here](http://xgboost.readthedocs.io/en/latest/parameter.html)*
+
+##### 1: Construct a set of hyperparameters to tune:
+```{r warning=FALSE}
+# construct the set of hyperparameters over which to search:
+ps <- makeParamSet(
+  makeNumericParam("eta", lower=0.01, upper=0.3, default = 0.02),
+  makeIntegerParam("max_depth", lower=2, upper=6, default = 4),
+  makeIntegerParam("min_child_weight", lower=1, upper=5, default = 1),
+  makeNumericParam("colsample_bytree", lower=.5, upper=1, default = 1),
+  makeNumericParam("subsample", lower=.5, upper=1, default = 1)
+)
+
+```
+
+##### 2: Tune hyperparameters using a 5 fold cross validation:
+
+```{r}
+# make cross validation description
+rdesc <- makeResampleDesc(method = "CV", iters = 5, predict = "test")
+
+# make random search iteration:
+ctrl <- makeTuneControlRandom(maxit = 200)
+
+# tune parameters (maximising auc):
+res_tune <- tuneParams(learner = lrn_xgb, task = dataset, resampling = rdesc,
+                        par.set = ps, control = ctrl, 
+                       measures = list(auc, mmce))
+
+```
+
+##### 3: Create a learner with these optimised hyperparameters
+
+```{r}
+lrn_xgb_opt <- setHyperPars(lrn_xgb, par.vals = res_tune$x)
+
+```
+#
+#
+#### Cross validate the optimised learner and evaluate performance.   
+
+*Note: Ideally one would test the set of optimal hyperparameters on a 
+previously unseen dataset. 
+However, given that the project is in phase 1, in which the model is not
+deployed on a wider population of patients, we have decided to retain as much
+signal as possible during the model fitting. Therefore for the time being the 
+same dataset on which the hyperparameters were selected is being used to evaluate performance. This may lead to optimistic
+estimates of performance.
+Using an unseen dataset for testing in the future could help alleviate this issue.*
+
+```{r}
+# run cross validation with tuned learner to estimate performance
+res_opt <- resample(learner = lrn_xgb_opt, 
+                    task = dataset, 
+                    resampling = rdesc, measures = list(auc, mmce))
+
+# add patient_id to resample predictions
+res_opt$pred$data$pat_id <- id[res_opt$pred$data$id]
+```
+#
+Evaluate performance for each fold of the cross validation.
+*Further information on performance metrics in the mlr
+package can be found [here](https://mlr-org.github.io/mlr-tutorial/release/html/performance/index.html)*
+```{r eval = TRUE}
+# evaluate performance for each fold
+print(res_opt$measures.test)
+```
+
+#
+#### Train a single model
+The idea is to train a single XGBoost over all the available data.  
+This allows for the evaluation of predictor importance.  
+
+##### 1: Train an xgboost on the dataset
+```{r}
+xgb_model <- train(learner = lrn_xgb_opt, task = dataset)
+```
+
+#
+##### 2: Evaluate [predictor importance](http://xgboost.readthedocs.io/en/latest/R-package/discoverYourData.html#feature-importance)
+
+```{r echo = TRUE, warning=FALSE}
+# overall importance:
+importance <- xgb.importance(feature_names = xgb_model$features,
+                                   model = xgb_model$learner.model)
+
+# run detailed importance (requires conversion of data to numeric matrix):
+detailed_imp <- xgb.importance(feature_names = xgb_model$features,
+                               model = xgb_model$learner.model, 
+                               data = as.matrix(sapply(dataset$env$data, 
+                                                       function(x) as.numeric(as.character(x)))),
+                               label = as.numeric(dataset$env$data$label))
+
+# join these importance tables to desciptions of predictors
+importance <- left_join(importance, descriptions, by = "Feature")
+detailed_imp <- left_join(detailed_imp, descriptions, by = "Feature")
+
+print(importance[1:5,c(1,2,6)])
+
+```
+#
+##### 3: Plot predictor importance
+
+```{r}
+xgb.ggplot.importance(importance_matrix = data.table(importance), 
+                      top_n = 10,
+                      rel_to_first = FALSE, 
+                      n_clusters = 3)
+
+```
+
+#
+### Integrating clinical insights using a Bayesian approach  
+
+This process takes in a set of nine predictors which are assumed to be clinically
+meaningful by domain experts but which are too sparsely populated in the data 
+to be used by XGBoost. It estimates a log likelihood for each of these variables.
+These log likelihoods are then weighted and combined with the original XGBoost model.
+The performance of the combined model is then checked against the performance of
+the original XGBoost model. It is expected that the inclusion of these clinical insights
+will result in a very small reduction in AUC.
+
+The process is as follows:
+
+1. A likelihood function is estimated for each variable (i.e. the density function 
+of each variable for each value of the outcome)
+2. A log-likelihood ratio (logit) is computed for each variable.
+3. The value of the logit for each variable is then weighted according to the weights provided by clinicians.
+4. A weighted sum is then computed over each logit and the logit of the original 
+XGBoost model score to produce a single vector of combined scores.
++ All weights are coerced such that they sum to 1 but retain their order- this 
+overcomes the difficulties faced when a patient presents with only a subset of the above variables.
++ A minimum weight is assigned to the original XGBoost model. 
+This weight is then allowed to take a larger value in order to ensure all weights sum to 1. 
+
+5. The new vector of combined scores can then be used in place of the vector of risk 
+scores output by the original XGBoost, and model performance can be estimated.
+
+
+#### Before modelling:
+
+Extract the names of the features to be modelled using the Bayesian technique and
+assign a minimum weight to the XGBoost model (see comment for explanation of minimum
+weight):
+```{r}
+# View the weights dataframe
+print(weights_df)
+
+# extract the set of variables of interest
+bayes_vars <- weights_df$feature
+
+# Define the minimum model weight. This is the minimum amount of confidence
+# the user has in the predictions from the xgboost model, relative to those from the
+# bayesian approach. In order to balance the influence of the model while 
+# preserving the input from the Bayesian approach, we
+# recommend a min_model_weight of 0.5:
+min_model_weight <- 0.5
+
+
+```
+#
+#### Step 1
+Estimate a likelihood function based on more densely populated features.
+
+* The idea is to generate a baseline distribution for the data, which can be used
+when a more specific distriution can't be estimated.
+
+```{r}
+# extract some date difference "diff" features from the 50 most important features
+data_extract <- raw_data %>% select_(.dots = importance$Feature[1:50]) %>%  select(contains("diff"))
+
+# stack these densely populated variables on top of each other
+data_stack <- data.frame(stack(data_extract), 
+                             label = rep(dataset$env$data$label, 
+                                         ncol(data_extract)))
+
+# remove missing values
+data_stack <- data_stack[!is.na(data_stack$values), ]
+
+# compute a likelihood function for these stacked variables
+model_prior = train_bayes(data_stack$values, data_stack$label, model__prior = NULL)
+
+```
+#
+#### Step 2
+Extract the nine "Bayesian" variables from the dataset.
+
+```{r}
+# extract bayes features from dataset:
+bayes_data <- select_(model_data, .dots = c(bayes_vars, "label")) 
+
+```
+#
+#### Step 3
+Generate a set of logit scores using cross validation: 
+
+* Using 3 fold cross validation, first estimate likelihood functions
+for the training fold (one for each class) using kernel density estimation.
+* Feed the test fold through these functions to output a set of likelihood values.
+* Convert the likelihoods into a single 'logit' score (log-likelihood ratio).
+* The result is a logit score for each patient in the dataset for each of the
+nine 'Bayesian' features.
+
+```{r}
+bayes_logit_preds <- bayes_data %>% select(-label) %>%  
+  lapply( function(feature, 
+                   label = bayes_data$label,
+                   model_prior = model_prior, k = 3) {
+  
+  # create dataframe of label and feature
+  cv_data <- data.frame(label = label, feature = feature)
+  
+  # assign each observation to one of k groups for cross validation
+  cv_data$fold <- dismo::kfold(x = cv_data, k = k)
+  
+  # define a column of zeros to be populated with predictions
+  cv_data$logit_scores <- NA
+  
+  # for each of these k groups, train a classifier on all other data, then
+  # use it to predict for group m:
+  
+  for(m in 1:k) {
+    
+    # define the training set
+    train_set <- cv_data[cv_data$fold != m, ]
+    
+    # remove missin values
+    train_set <- train_set[!is.na(train_set$feature),]
+    
+    # define the prediction_set
+    pred_set <- cv_data[cv_data$fold == m, ]
+    
+    # train classifier using training set
+    train_cv <- train_bayes(feature = train_set$feature, label = train_set$label,
+                            model__prior = model__prior)
+    
+    # predict on test set
+    pred_cv <- predict_bayes_logit(model = train_cv, feature = pred_set$feature)
+    
+    # populate cv_data with predictions
+    cv_data$logit_scores[cv_data$fold == m] <- pred_cv
+    
+  }
+  
+  # returns a list of logit scores from each outer fold of the cross validation
+  return(cv_data$logit_scores)
+  
+})
+
+# combine with patient id and label into one dataframe
+bayes_logit_preds <- data.frame(label = bayes_data$label,
+                             pat_id = id,
+                             bayes_logit_preds)
+
+```
+#
+#### Step 4
+Compute a weighted sum of the logit scores and the original score from
+the XGBoost model.
+
+* The idea is to multiply the each of the nine vectors of logit scores by a weight
+provided by clinicians.
+* These weighted logit scores are combined with the original score from the
+XGBoost model via a weighted sum.
+* The output is a single 'combined' logit score, which can be used in place
+of the original score from the XGBoost.
+```{r warning=FALSE}
+# extract prediction object
+predictions <- res_opt$pred
+
+# convert XGBoost scores to logits
+predictions$data$xgb_logit <- logit_transform(predictions$data$prob.1)
+
+# join XGBoost's predictions onto the Bayesian predictions
+pred_join <- inner_join(bayes_logit_preds, select(predictions$data, pat_id, xgb_logit), by = "pat_id")
+
+# ensure pred_join has correct column classes otherwise combining logits
+# will not work:
+pred_join[,3:ncol(pred_join)] <- sapply(pred_join[,3:ncol(pred_join)], 
+                                        function(x) { as.numeric(as.character(x)) })
+
+# combine the logit scores to produce one score (please ignore warnings):
+logits_combined <- combine_logits(input_data = pred_join, 
+                                  weights = weights_df, 
+                                  min_model_weight = min_model_weight,
+                                  model_logit_column = "xgb_logit")
+
+```
+#
+#### Step 5
+Check performance of combined model to ensure the auc has not
+reduced significantly
+
+```{r}
+# replace predictions contents of predictions object with results from 
+# combined model
+combined_pred <- predictions
+combined_pred$data$prob.1 <- logits_combined$sum_weighted_logit
+combined_pred$data$truth <- pred_join$label
+combined_pred$data$pat_id <- logits_combined$pat_id
+combined_pred$data[c("iter", "response", "set", "xgb_logit", "id", "prob.0")] <- NULL
+
+# compute auc for combined model. It should show no significant change
+# from the auc in the original model.
+performance(pred = combined_pred, measures = auc)
+
+# compare this to the performance of the original XGBoost model
+res_opt$aggr[1]
+
+# The auc may for the Bayesian model be marginally lower than the pure XGBoost model;
+# However it should not be significantly lower since the Bayesian model
+# only affects 230 patients.
+
+```
+
+*For information about the methods deployed in this Notebook, please contact
+the author. *
+
+
+
+
+

@@ -20,11 +20,9 @@ source("F:/Lachlan/biogen_tecfidera/bayesian_modelling/12_bayes_combine_logits_f
 # Provide the location of the data, the scores from XGBoost, and where the results
 # are to be stored:
 data_dir <- "F:/Projects/Biogen_Tecfidera/Data/Processed/"
+weights_dir <- "F:/Projects/Biogen_Tecfidera/Data/Questionnaire_response/"
 results_dir <- "F:/Projects/Biogen_Tecfidera/Results/modelling_09_bayesian/LM_results/"
 xgboost_scores_dir <- "F:/Projects/Biogen_Tecfidera/Results/modelling_10_HP_optimisation/"
-
-# load in the custom weights (please provide them as numbers between 0 and 1):
-# weights <- data.frame(feature = colnames(bayes_data)[1:8], weight = seq(0.125, 1, 0.125))
 
 # Define the minimum model weight. This is the minimum amount of confidence
 # the user has in the predictions from the model, relative to those from the
@@ -38,17 +36,13 @@ min_model_weight <- 0.5
 combined <- read_rds(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_data.rds"))
 config = read_csv(paste0(data_dir, "combined_date_complied_rectified_num_gaba_copay_config.csv"))
 
-# define the list of variables to be used in the Bayesian analysis:
-bayes_vars <- c('post_symps_fst8_diff','post_symps_fst10_diff','post_symps_fst12_diff',
-                'post_symps_fst13_diff','post_symps_fst14_diff','post_symps_fst15_diff',
-                'post_symps_fst16_diff', 'post_dme_fst_diff')
-
 # define some weights expressed as probabilities:
-weights <- data.frame(feature = bayes_vars, weight = seq(0.125, 1, 0.125))
+weights_df <- read_csv(paste0(weights_dir, "Biogen_responses_reformatted.csv"))
+bayes_vars <- weights_df$Feature
 
 # SANITY CHECK: Print the descriptions of these variables as a sanity check
-bayes_descriptions <- config$Description[config$Column %in% bayes_vars]
-print(bayes_descriptions)
+bayes_descriptions <- config[config$Column %in% bayes_vars, c(1,4)]
+View(bayes_descriptions)
 
 # STEP 1 ------------------------------------------------------------------
 # Estimate likelihood functions based on more densely populated features.
@@ -84,7 +78,8 @@ model_prior <- read_rds(paste0(results_dir, "stacked_prior_likelihood_model.rds"
 bayes_data <- combined[c(bayes_vars, "discontinue_flg", "pat_id")]
 
 # compute likelihood functions for each of these features, along with the feature
-# space and the number of positives and negatives for that feature:
+# space and the number of positives and negatives for that feature.
+# If a feature has too few observations to 
 bayes_likelihood <- lapply(bayes_data[, 1:8], 
                      function(x) { train_bayes(feature = x, 
                                                label = bayes_data$discontinue_flg, 
@@ -143,7 +138,8 @@ bayes_logit_preds <- lapply(bayes_data[,1:8], function(feature, label = bayes_da
 bayes_logit_preds <- data.frame(label = bayes_data$discontinue_flg,
                              pat_id = bayes_data$pat_id,
                              bayes_logit_preds)
-
+write_rds(bayes_logit_preds, paste0(results_dir, "bayes_logit_predictions.rds"))
+bayes_logit_preds <- read_rds(paste0(results_dir, "bayes_logit_predictions.rds"))
 
 # STEP 3 ------------------------------------------------------------------
 # Load in the XGBoost predictions and combine them with the logits from the
@@ -170,7 +166,7 @@ pred_join[,3:ncol(pred_join)] <- sapply(pred_join[,3:ncol(pred_join)],
 
 # combine the logit scores to produce one score:
 logits_combined <- combine_logits(input_data = pred_join, 
-                                  weights = weights, 
+                                  weights = weights_df, 
                                   min_model_weight = min_model_weight,
                                   model_logit_column = "xgb_logit")
 
